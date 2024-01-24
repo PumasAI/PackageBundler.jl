@@ -1,0 +1,6 @@
+/Manifest.toml
+/test/Manifest.toml
+*.pem
+*.pub
+test/build
+.DS_Store

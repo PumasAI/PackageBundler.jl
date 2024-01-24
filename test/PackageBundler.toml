@@ -1,0 +1,12 @@
+name = "LocalCustomRegistry"
+uuid = "a0e467e0-8c5a-11e4-9d3f-823b93f75cbb"
+environments = ["envs/CustomEnv"]
+outputs = ["build/LocalCustomRegistry", "build/LocalCustomRegistry.tar.gz"]
+key = "key"
+clean = true
+
+[packages]
+"13f3f980-e62b-5c42-98c6-ff1f3baf88f0" = "CairoMakie"
+"479239e8-5488-4da2-87a7-35f2df7eef83" = "Catalyst"
+"0c46a032-eb83-5123-abaf-570d42b7fbaa" = "DifferentialEquations" 
+"961ee093-0014-501f-94e3-6117800e7a78" = "ModelingToolkit"

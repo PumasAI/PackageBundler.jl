@@ -1,0 +1,6 @@
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Catalyst = "479239e8-5488-4da2-87a7-35f2df7eef83"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
+Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
