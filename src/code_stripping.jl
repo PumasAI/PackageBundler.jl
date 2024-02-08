@@ -51,6 +51,7 @@ function _generate_stripped_bundle(;
                     run(`$gitcmd init`)
                     run(`$gitcmd config user.name "PackageBundler"`)
                     run(`$gitcmd config user.email ""`)
+                    run(`$gitcmd config core.autocrlf false`)
                 end
 
                 # Ensure that the versions are sorted first before committing,
