@@ -17,7 +17,7 @@ function keypair(dir::AbstractString = pwd())
 
     @info "Generating key pair for signing stripped packages." dir
     dir = abspath(dir)
-    openssl = OpenSSL_jll.openssl
+    openssl = OpenSSL_jll.openssl()
     cmd = Cmd(["genrsa", "-out", private, "4096"])
     run(`$openssl $cmd`)
     cmd = Cmd(["rsa", "-in", private, "-pubout"])
@@ -27,7 +27,7 @@ function keypair(dir::AbstractString = pwd())
 end
 
 function _sign_file(file, private_key)
-    openssl = OpenSSL_jll.openssl
+    openssl = OpenSSL_jll.openssl()
     cmd = Cmd([
         "dgst",
         "-sign",
@@ -44,7 +44,7 @@ function _sign_file(file, private_key)
 end
 
 function _verify_file(file, public_key)
-    openssl = OpenSSL_jll.openssl
+    openssl = OpenSSL_jll.openssl()
     cmd = Cmd([
         "dgst",
         "-verify",

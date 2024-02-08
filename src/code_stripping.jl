@@ -51,6 +51,7 @@ function _generate_stripped_bundle(;
                     run(`$gitcmd init`)
                     run(`$gitcmd config user.name "PackageBundler"`)
                     run(`$gitcmd config user.email ""`)
+                    run(`$gitcmd config core.autocrlf false`)
                 end
 
                 # Ensure that the versions are sorted first before committing,
@@ -69,7 +70,21 @@ function _generate_stripped_bundle(;
                     run(Cmd([gitcmd, "commit", "-m", msg]))
                     run(Cmd([gitcmd, "tag", "-a", "v$version", "-m", msg]))
 
-                    pkg_info["git-tree-sha1"] = bytes2hex(Pkg.GitTools.tree_hash(temp_dir))
+                    # Interestingly, using `tree_hash` failed on Windows with a
+                    # `git object <commit> could not be found` error when attempting to
+                    # clone the stripped packages. It would appear that the tree hash
+                    # doesn't match what it should be on that platform, whereas it works
+                    # correctly on macOS and Linux, both locally and on GitHub runners.
+                    #
+                    # ```
+                    # sha = bytes2hex(Pkg.GitTools.tree_hash(temp_dir))
+                    # ```
+                    #
+                    # To get around this we use the `rev-parse` and `^{tree}` to get the
+                    # "real" tree hash.
+                    rev = readchomp(`$gitcmd rev-parse HEAD`)
+                    sha = readchomp(Cmd([gitcmd, "rev-parse", "$rev^{tree}"]))
+                    pkg_info["git-tree-sha1"] = sha
                 end
                 run(`$gitcmd log`)
             end
