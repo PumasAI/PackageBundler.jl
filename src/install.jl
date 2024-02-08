@@ -28,6 +28,7 @@ function main()
     registry_toml_file = joinpath(registry, "Registry.toml")
     registry_toml = TOML.parsefile(registry_toml_file)
     registry_name = registry_toml["name"]
+    registry_uuid = registry_toml["uuid"]
 
     current_registry = joinpath(depot, "registries", registry_name)
     current_registry_remover = joinpath(current_registry, "remove.jl")
@@ -83,7 +84,8 @@ function main()
                 if endswith(file, "remove.jl")
                     content = replace(
                         content,
-                        "{{ARTIFACTS}}" => normpath(joinpath(@__DIR__, "..")),
+                        "{{ENVIRONMENTS}}" => join(new_environments, " "),
+                        "{{REGISTRY_UUID}}" => registry_uuid,
                     )
                 end
                 destination = normpath(joinpath(temp_dir, relpath(root, registry)))

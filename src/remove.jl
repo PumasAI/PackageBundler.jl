@@ -5,17 +5,11 @@
 
 pushfirst!(LOAD_PATH, "@stdlib")
 import Pkg
-import TOML
 popfirst!(LOAD_PATH)
 
 function main()
-    artifacts = "{{ARTIFACTS}}"
-    environments = normpath(joinpath(artifacts, "environments"))
-    packages = normpath(joinpath(artifacts, "packages"))
-    registry = normpath(joinpath(artifacts, "registry"))
-
     current_environments = joinpath(@__DIR__, "..", "..", "environments")
-    environments_to_remove = readdir(environments)
+    environments_to_remove = strip.(split("{{ENVIRONMENTS}}"))
     @info "Removing environments" environments_to_remove
     for environment in environments_to_remove
         current_environment = joinpath(current_environments, environment)
@@ -29,11 +23,7 @@ function main()
             @warn "Environment not found" environment
         end
     end
-
-    resistry_toml_file = joinpath(registry, "Registry.toml")
-    registry_toml = TOML.parsefile(resistry_toml_file)
-    registry_uuid = registry_toml["uuid"]
-    Pkg.Registry.rm(Pkg.RegistrySpec(; uuid = registry_uuid))
+    Pkg.Registry.rm(Pkg.RegistrySpec(; uuid = "{{REGISTRY_UUID}}"))
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

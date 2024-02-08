@@ -48,7 +48,7 @@ function _generate_stripped_bundle(;
                 if isdir(".git")
                     error("Unreachable reached, this shouldn't be a git repo already.")
                 else
-                    run(`$gitcmd init`)
+                    run(`$gitcmd init -b main`)
                     run(`$gitcmd config user.name "PackageBundler"`)
                     run(`$gitcmd config user.email ""`)
                     run(`$gitcmd config core.autocrlf false`)
