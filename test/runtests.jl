@@ -23,7 +23,7 @@ using Test, PackageBundler
             )
             run(`$(Base.julia_cmd()) --startup-file=no $install_script`)
             run(
-                `$(Base.julia_cmd()) --startup-file=no --project=@CustomEnv -e 'push!(LOAD_PATH, "@stdlib"); import Pkg; Pkg.resolve(); Pkg.precompile()'`,
+                `$(Base.julia_cmd()) --startup-file=no --project=@CustomEnv -e 'push!(LOAD_PATH, "@stdlib"); import Pkg; Pkg.resolve(); Pkg.precompile("CairoMakie")'`,
             )
             result = readchomp(
                 `$(Base.julia_cmd()) --startup-file=no --project=@CustomEnv -e 'import CairoMakie; print(first(functionloc(CairoMakie.best_font, Tuple{Char})))'`,
