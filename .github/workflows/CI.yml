@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           persist-credentials: false
-      - uses: julia-actions/setup-julia@a1561e938c17e7aaf8236334d6d533e774c71dcd
+      - uses: julia-actions/setup-julia@ac0d62164df5a47de404f4e96ce86a1a28a28d56
         with:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@dc1a3cdeacb521b0ca93cfc66143fcadb15a5bd0
@@ -78,7 +78,7 @@ jobs:
           - bundle-windows-latest
 
     steps:
-      - uses: julia-actions/setup-julia@a1561e938c17e7aaf8236334d6d533e774c71dcd
+      - uses: julia-actions/setup-julia@ac0d62164df5a47de404f4e96ce86a1a28a28d56
         with:
           version: ${{ matrix.version }}
 
