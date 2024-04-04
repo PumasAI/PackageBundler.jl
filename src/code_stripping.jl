@@ -8,7 +8,7 @@ function _generate_stripped_bundle(;
     uuid::Union{AbstractString,Integer,Base.UUID},
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
-    multiplexer::String,
+    multiplexers::Vector{String},
 )
     output_dir = abspath(output_dir)
 
@@ -27,7 +27,7 @@ function _generate_stripped_bundle(;
             stripped = stripped,
             key_pair = key_pair,
             handlers = handlers,
-            multiplexer = multiplexer,
+            multiplexers = multiplexers,
         )
 
         stripped_uuid_mapping = merge(stripped_uuid_mapping, new_stripped_uuid_mapping)
@@ -255,7 +255,7 @@ function _process_project_env(;
     stripped::Dict{String,String},
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
-    multiplexer::String,
+    multiplexers::Vector{String},
 )
     project_dir = normpath(project_dir)
     output_dir = normpath(output_dir)
@@ -301,7 +301,7 @@ function _process_project_env(;
                 stripped_pkg_uuid_mapping,
                 key_pair,
                 handlers,
-                multiplexer,
+                multiplexers,
             )
             versions = get!(Dict{String,Any}, pkg_version_info, each_name)
             versions[version_info["project"]["version"]] = version_info
@@ -478,7 +478,7 @@ function _strip_package(
     uuid_replacements::Dict,
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
-    multiplexer::String,
+    multiplexers::Vector{String},
 )
     @info "Stripping source code." package
 
@@ -588,10 +588,8 @@ function _strip_package(
                 TOML.print(io, Dict("julia_files" => julia_files, "handlers" => handlers))
             end
             script = joinpath(@__DIR__, "serializer.jl")
-            envs = isempty(multiplexer) ? [] : [multiplexer => "$julia_version"]
-            withenv(envs...) do
-                run(`$(Base.julia_exename()) --startup-file=no $(script) $(toml_file)`)
-            end
+            binary = _process_multiplexers(multiplexers, julia_version)
+            run(`$(binary) --startup-file=no $(script) $(toml_file)`)
         end
 
         # Sign all the files that have been created/modified during serialization.
@@ -631,4 +629,32 @@ function _stripped_source_path(
 )
     project_root = dirname(project_toml)
     return joinpath("[bundled]", package_name, version, relpath(source_file, project_root))
+end
+
+function _process_multiplexers(multiplexers::Vector{String}, julia_version::VersionNumber)
+    for multiplexer in multiplexers
+        exists = Sys.which(multiplexer)
+        if !isnothing(exists)
+            if multiplexer == "juliaup"
+                return `julia +$(julia_version)`
+            elseif multiplexer == "asdf"
+                return withenv("ASDF_JULIA_VERSION" => "$(julia_version)") do
+                    path = readchomp(`asdf which julia`)
+                    return `$(path)`
+                end
+            elseif multiplexer == "mise"
+                return withenv("MISE_JULIA_VERSION" => "$(julia_version)") do
+                    path = readchomp(`mise which julia`)
+                    return `$(path)`
+                end
+            else
+                error("Unsupported multiplexer: $multiplexer")
+            end
+        end
+    end
+    if isempty(multiplexers)
+        return Base.julia_cmd()
+    else
+        error("no multiplexers found: $(repr(multiplexers))")
+    end
 end

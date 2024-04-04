@@ -3,4 +3,5 @@
 *.pem
 *.pub
 test/build
+test/multiversion/build
 .DS_Store
