@@ -309,13 +309,52 @@ end
 # Environment package version sniffer. Runs in a separate process to avoid
 # interacting with this package's package versions.
 
+# Returns data of the form:
+#
+# Dict("<uuid>" => Dict("name" => "<name>", "uuid" => "<uuid>", "path" => "<path>"))
+#
 function _sniff_versions(environment::AbstractString)
-    @info "Loading packages." environment
-    mktempdir() do temp
-        output = joinpath(temp, "versions.toml")
-        script = joinpath(@__DIR__, "load.jl")
-        run(`$(Base.julia_cmd()) --project=$environment --startup-file=no $script $output`)
-        TOML.parsefile(output)
+    project = Base.env_project_file(environment)
+    env = Pkg.Types.EnvCache(project)
+    output = Dict{String,Dict{String,String}}()
+    for (uuid, entry) in env.manifest.deps
+        name = "$(entry.name)"
+        path = nothing
+        if entry.tree_hash === nothing
+            # It's a stdlib, search for it there:
+            candidate = joinpath(Pkg.stdlib_dir(), name)
+            if isdir(candidate)
+                path = candidate
+            else
+                error("failed to find $entry")
+            end
+        else
+            # Search for the package in all depots:
+            slug = Base.version_slug(uuid, entry.tree_hash)
+            for depot in Pkg.depots()
+                candidate = joinpath(depot, "packages", name, slug)
+                if isdir(candidate)
+                    path = candidate
+                    break
+                end
+            end
+        end
+        if isnothing(path)
+            error("failed to find $entry")
+        else
+            output["$uuid"] = Dict("name" => name, "uuid" => "$uuid", "path" => path)
+        end
+    end
+    _check_required_deps(output)
+    return output
+end
+
+# Dependencies that are required for functioning of the bundled code.
+function _check_required_deps(deps)
+    required_deps = Dict("Serialization" => "9e88b42a-f829-5b0c-bbe9-9e923198166b")
+    for (name, uuid) in required_deps
+        entry = get(Dict{String,String}, deps, uuid)
+        get(entry, "name", nothing) == name || error("`$name` dependency missing from env.")
     end
 end
 
