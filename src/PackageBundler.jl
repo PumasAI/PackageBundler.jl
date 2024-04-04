@@ -30,6 +30,7 @@ environments = ["env1", "env2"]               # required
 outputs = "PackageBundle"                     # default: same as `name`
 key = "key"                                   # default: "key"
 clean = false                                 # default: false
+multiplexer = ""                              # default: ""
 
 [packages]
 "<uuid>" = "<name>"
@@ -78,6 +79,14 @@ The `clean` field is a boolean flag that determines whether the output directory
 should be cleaned before generating the bundle. If `clean` is `true` and the
 output directory exists it will be deleted before generating the bundle. `clean`
 has no effect if the output is a tarball or an `Artifacts.toml` file.
+
+The `multiplexer` field sets the environment variable that is used to specify
+the version of `julia` that is run, e.g `ASDF_JULIA_VERSION`, `JULIAUP_CHANNEL`,
+`MISE_JULIA_VERSION`, etc. This is only relevant if your bundle config and
+environments contains multiple different Julia versions that are all used by the
+same versions of packages that need to be stripped and serialized, since
+serialization requires the exact version of `julia` for deserializating the
+expressions correctly.
 """
 function bundle(
     config::AbstractString = "PackageBundler.toml";
@@ -143,6 +152,10 @@ function bundle(
     outputs = String.(vcat(outputs))
     outputs = isempty(outputs) ? [name] : outputs
 
+    # Multiplexer. The environment variable used by the Julia version multiplexer
+    # to select the version of `julia` to run.
+    multiplexer = get(config, "multiplexer", "")::String
+
     mktempdir() do temp_dir
         # Generate the bundle in a temp directory, afterwhich copy the result
         # into the required output targets.
@@ -154,6 +167,7 @@ function bundle(
             uuid = uuid,
             key_pair = (; private, public),
             handlers = handlers,
+            multiplexer = multiplexer,
         )
         for output in outputs
             output = normpath(joinpath(dir, output))
