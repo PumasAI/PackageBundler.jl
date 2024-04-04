@@ -53,6 +53,12 @@ jobs:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@dc1a3cdeacb521b0ca93cfc66143fcadb15a5bd0
       - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c
+
+      # `PackageBundler.bundle()` expects the environments to be bundled to have
+      # already been instantiated (hence downloaded) prior to running it. We
+      # don't need to precompile it though.
+      - run: julia --project=test/envs/CustomEnv -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.instantiate()'
+
       - uses: julia-actions/julia-runtest@79a7e100883947123f8263c5f06e6c0ea3eb972f
       - uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3
         with:
