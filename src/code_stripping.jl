@@ -289,10 +289,11 @@ function _process_project_env(;
     for (each_uuid, each_name) in stripped
         if haskey(package_paths, each_uuid)
             if package_paths[each_uuid]["name"] != each_name
-                errorasda
+                error("mismatched package names $each_name")
             end
             version_info = _strip_package(
                 package_paths[each_uuid]["path"],
+                package_paths[each_uuid]["julia_version"],
                 output_dir,
                 stripped_pkg_uuid_mapping,
                 key_pair,
@@ -311,12 +312,12 @@ end
 
 # Returns data of the form:
 #
-# Dict("<uuid>" => Dict("name" => "<name>", "uuid" => "<uuid>", "path" => "<path>"))
+# Dict("<uuid>" => Dict("name" => "<name>", "uuid" => "<uuid>", "path" => "<path>", "julia_version" => v"<version>"))
 #
 function _sniff_versions(environment::AbstractString)
     project = Base.env_project_file(environment)
     env = Pkg.Types.EnvCache(project)
-    output = Dict{String,Dict{String,String}}()
+    output = Dict{String,Dict{String,Any}}()
     for (uuid, entry) in env.manifest.deps
         name = "$(entry.name)"
         path = nothing
@@ -342,7 +343,12 @@ function _sniff_versions(environment::AbstractString)
         if isnothing(path)
             error("failed to find $entry")
         else
-            output["$uuid"] = Dict("name" => name, "uuid" => "$uuid", "path" => path)
+            output["$uuid"] = Dict(
+                "name" => name,
+                "uuid" => "$uuid",
+                "path" => path,
+                "julia_version" => env.manifest.julia_version,
+            )
         end
     end
     _check_required_deps(output)
@@ -463,6 +469,7 @@ end
 
 function _strip_package(
     package::AbstractString,
+    julia_version::VersionNumber,
     output::AbstractString,
     uuid_replacements::Dict,
     key_pair::@NamedTuple{private::String, public::String},
@@ -510,7 +517,13 @@ function _strip_package(
 
         package_name = toml["name"]
         entry_point = joinpath(temp, "src", "$package_name.jl")
-        _stripcode(entry_point, key_pair; entry_point = package_name, handlers)
+        _stripcode(
+            entry_point,
+            julia_version,
+            key_pair;
+            entry_point = package_name,
+            handlers,
+        )
 
         # Now we need to strip the code from all the other files in the package.
         src = joinpath(temp, "src")
@@ -522,7 +535,7 @@ function _strip_package(
                 # we don't need the wrapper module syntax around the rest of the
                 # files.
                 if endswith(file, ".jl") && path != entry_point
-                    _stripcode(path, key_pair; handlers)
+                    _stripcode(path, julia_version, key_pair; handlers)
                 end
             end
         end
@@ -546,7 +559,7 @@ function _strip_package(
                     path = joinpath(root, file)
                     if endswith(file, ".jl")
                         entry_point = get(maybe_entry_point, path, nothing)
-                        _stripcode(path, key_pair; entry_point, handlers)
+                        _stripcode(path, julia_version, key_pair; entry_point, handlers)
                     end
                 end
             end
@@ -555,8 +568,17 @@ function _strip_package(
         package_dir = joinpath(output, "packages", package_name, version)
         isdir(package_dir) || mkpath(package_dir)
 
-        for each in readdir(temp)
-            cp(joinpath(temp, each), joinpath(package_dir, each); force = true)
+        for (root, _, files) in walkdir(temp)
+            for file in files
+                src_file = joinpath(root, file)
+                dst_file = joinpath(package_dir, relpath(root, temp), file)
+                if isfile(dst_file) && read(src_file) != read(dst_file)
+                    error("identical file paths, mismatched content: $src_file $dst_file")
+                end
+                dst_dir = dirname(dst_file)
+                isdir(dst_dir) || mkpath(dst_dir)
+                write(dst_file, read(src_file))
+            end
         end
 
         return Dict("path" => package_dir, "project" => toml)
@@ -587,6 +609,7 @@ end
 
 function _stripcode(
     filename::AbstractString,
+    julia_version::VersionNumber,
     key_pair::@NamedTuple{private::String, public::String};
     entry_point = nothing,
     handlers::Dict,
@@ -595,7 +618,8 @@ function _stripcode(
     xorshift = unsafe_trunc(UInt8, length(filename))
 
     # Create a serialized version of the parsed code to, somewhat, obfuscate it.
-    jls = "$(filename)s"
+    jls = "$(filename).$(julia_version).jls"
+    jls_unescaped = "$(filename).\$(VERSION).jls"
     open(jls, "w") do io
         expr = Meta.parseall(read(filename, String))
         Meta.isexpr(expr, :toplevel) || error("Expected toplevel expr. $expr")
@@ -669,7 +693,7 @@ function _stripcode(
                 """
             end
         end
-        print(io, code_loader(jls, xorshift))
+        print(io, code_loader(jls_unescaped, xorshift))
         isnothing(entry_point) || println(io, "end")
     end
     _sign_file(filename, key_pair.private)
