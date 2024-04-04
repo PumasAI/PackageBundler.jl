@@ -8,6 +8,7 @@ function _generate_stripped_bundle(;
     uuid::Union{AbstractString,Integer,Base.UUID},
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
+    multiplexer::String,
 )
     output_dir = abspath(output_dir)
 
@@ -26,6 +27,7 @@ function _generate_stripped_bundle(;
             stripped = stripped,
             key_pair = key_pair,
             handlers = handlers,
+            multiplexer = multiplexer,
         )
 
         stripped_uuid_mapping = merge(stripped_uuid_mapping, new_stripped_uuid_mapping)
@@ -253,6 +255,7 @@ function _process_project_env(;
     stripped::Dict{String,String},
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
+    multiplexer::String,
 )
     project_dir = normpath(project_dir)
     output_dir = normpath(output_dir)
@@ -289,14 +292,16 @@ function _process_project_env(;
     for (each_uuid, each_name) in stripped
         if haskey(package_paths, each_uuid)
             if package_paths[each_uuid]["name"] != each_name
-                errorasda
+                error("mismatched package names $each_name")
             end
             version_info = _strip_package(
                 package_paths[each_uuid]["path"],
+                package_paths[each_uuid]["julia_version"],
                 output_dir,
                 stripped_pkg_uuid_mapping,
                 key_pair,
                 handlers,
+                multiplexer,
             )
             versions = get!(Dict{String,Any}, pkg_version_info, each_name)
             versions[version_info["project"]["version"]] = version_info
@@ -311,12 +316,12 @@ end
 
 # Returns data of the form:
 #
-# Dict("<uuid>" => Dict("name" => "<name>", "uuid" => "<uuid>", "path" => "<path>"))
+# Dict("<uuid>" => Dict("name" => "<name>", "uuid" => "<uuid>", "path" => "<path>", "julia_version" => v"<version>"))
 #
 function _sniff_versions(environment::AbstractString)
     project = Base.env_project_file(environment)
     env = Pkg.Types.EnvCache(project)
-    output = Dict{String,Dict{String,String}}()
+    output = Dict{String,Dict{String,Any}}()
     for (uuid, entry) in env.manifest.deps
         name = "$(entry.name)"
         path = nothing
@@ -342,7 +347,12 @@ function _sniff_versions(environment::AbstractString)
         if isnothing(path)
             error("failed to find $entry")
         else
-            output["$uuid"] = Dict("name" => name, "uuid" => "$uuid", "path" => path)
+            output["$uuid"] = Dict(
+                "name" => name,
+                "uuid" => "$uuid",
+                "path" => path,
+                "julia_version" => env.manifest.julia_version,
+            )
         end
     end
     _check_required_deps(output)
@@ -463,10 +473,12 @@ end
 
 function _strip_package(
     package::AbstractString,
+    julia_version::VersionNumber,
     output::AbstractString,
     uuid_replacements::Dict,
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
+    multiplexer::String,
 )
     @info "Stripping source code." package
 
@@ -510,7 +522,20 @@ function _strip_package(
 
         package_name = toml["name"]
         entry_point = joinpath(temp, "src", "$package_name.jl")
-        _stripcode(entry_point, key_pair; entry_point = package_name, handlers)
+
+        # Capture all the files that we want to serialize, afterwhich we then
+        # launch a `julia` with the required version to perform the
+        # serialization in a single batch, rather than launching a new process
+        # for each file.
+        julia_files = []
+        function _add_to_code_stripping_list!(filename; entry_point = nothing)
+            push!(
+                julia_files,
+                Dict("filename" => filename, "entry_point" => something(entry_point, "")),
+            )
+        end
+
+        _add_to_code_stripping_list!(entry_point; entry_point = package_name)
 
         # Now we need to strip the code from all the other files in the package.
         src = joinpath(temp, "src")
@@ -522,7 +547,7 @@ function _strip_package(
                 # we don't need the wrapper module syntax around the rest of the
                 # files.
                 if endswith(file, ".jl") && path != entry_point
-                    _stripcode(path, key_pair; handlers)
+                    _add_to_code_stripping_list!(path)
                 end
             end
         end
@@ -546,8 +571,34 @@ function _strip_package(
                     path = joinpath(root, file)
                     if endswith(file, ".jl")
                         entry_point = get(maybe_entry_point, path, nothing)
-                        _stripcode(path, key_pair; entry_point, handlers)
+                        _add_to_code_stripping_list!(path; entry_point)
                     end
+                end
+            end
+        end
+
+        # Perform the parsing and serialization in a separate process, since we
+        # want the serialized `Expr`s to be deserializable by the right `julia`
+        # version. Any manifests that happen to require the exact same version
+        # of a stripped package and have different `julia_version`s need their
+        # own serialized versions of the source.
+        mktempdir() do toml_temp
+            toml_file = joinpath(toml_temp, "payload.toml")
+            open(toml_file, "w") do io
+                TOML.print(io, Dict("julia_files" => julia_files, "handlers" => handlers))
+            end
+            script = joinpath(@__DIR__, "serializer.jl")
+            envs = isempty(multiplexer) ? [] : [multiplexer => "$julia_version"]
+            withenv(envs...) do
+                run(`$(Base.julia_exename()) --startup-file=no $(script) $(toml_file)`)
+            end
+        end
+
+        # Sign all the files that have been created/modified during serialization.
+        for (root, _, files) in walkdir(temp)
+            for file in files
+                if endswith(file, ".jl") || endswith(file, ".jls")
+                    _sign_file(joinpath(root, file), key_pair.private)
                 end
             end
         end
@@ -555,8 +606,17 @@ function _strip_package(
         package_dir = joinpath(output, "packages", package_name, version)
         isdir(package_dir) || mkpath(package_dir)
 
-        for each in readdir(temp)
-            cp(joinpath(temp, each), joinpath(package_dir, each); force = true)
+        for (root, _, files) in walkdir(temp)
+            for file in files
+                src_file = joinpath(root, file)
+                dst_file = joinpath(package_dir, relpath(root, temp), file)
+                if isfile(dst_file) && read(src_file) != read(dst_file)
+                    error("identical file paths, mismatched content: $src_file $dst_file")
+                end
+                dst_dir = dirname(dst_file)
+                isdir(dst_dir) || mkpath(dst_dir)
+                write(dst_file, read(src_file))
+            end
         end
 
         return Dict("path" => package_dir, "project" => toml)
@@ -571,108 +631,4 @@ function _stripped_source_path(
 )
     project_root = dirname(project_toml)
     return joinpath("[bundled]", package_name, version, relpath(source_file, project_root))
-end
-
-# Source code stripping for a single file.
-
-function _extract_module_doc(expr::Expr, name::Symbol)
-    if Meta.isexpr(expr, :macrocall, 4) && expr.args[1] == GlobalRef(Core, Symbol("@doc"))
-        docs = expr.args[3]
-        modexpr = expr.args[4]
-        push!(modexpr.args[end].args, :(@doc $docs $name))
-        return modexpr
-    end
-    return expr
-end
-
-function _stripcode(
-    filename::AbstractString,
-    key_pair::@NamedTuple{private::String, public::String};
-    entry_point = nothing,
-    handlers::Dict,
-)
-    isfile(filename) || error("File not found: $filename")
-    xorshift = unsafe_trunc(UInt8, length(filename))
-
-    # Create a serialized version of the parsed code to, somewhat, obfuscate it.
-    jls = "$(filename)s"
-    open(jls, "w") do io
-        expr = Meta.parseall(read(filename, String))
-        Meta.isexpr(expr, :toplevel) || error("Expected toplevel expr. $expr")
-
-        # If we have an entry-point we need to strip the wrapper module syntax.
-        if !isnothing(entry_point)
-            expr = expr.args[end]
-
-            expr = _extract_module_doc(expr, Symbol(entry_point))
-
-            Meta.isexpr(expr, :module) ||
-                error("Expected module expr for entrypoint. $expr")
-
-            expr = expr.args[end]
-            Meta.isexpr(expr, :block) ||
-                error("Expected block expr in module expression. $expr")
-
-            # Code injection handlers. For builder-provided extra code that
-            # should be added to packages.
-            code_injector = get(handlers, :code_injector) do
-                function (filename)
-                    quote
-                        function __init__()
-                            @debug "Loading serialized code."
-                        end
-                    end
-                end
-            end
-            extra_code = :(module $(gensym())
-            $(code_injector(filename))
-            end)
-
-            expr = Expr(:toplevel, expr.args..., extra_code)
-        end
-        # TODO: perform more aggressive obfuscation here, like renaming local
-        # variables, etc. There really isn't a way to fully hide the code, a
-        # determined attacker will always be able to reverse engineer it. We
-        # just want to make it non-obvious.
-
-        code_transformer = get(handlers, :code_transformer) do
-            function (filename, expr)
-                return expr
-            end
-        end
-        expr = code_transformer(filename, expr)
-
-        # Serialized expressions are expected to be wrapped in a `toplevel`.
-        Meta.isexpr(expr, :toplevel) || error("Expected toplevel expr. $expr")
-        buffer = IOBuffer()
-        Serialization.serialize(buffer, expr)
-        bytes = take!(buffer)
-        write(io, xor.(bytes, xorshift))
-    end
-    _sign_file(jls, key_pair.private)
-
-    # Create a shim file that will load the serialized code and evaluate it at
-    # precompilation time. Working directory is set to the directory of the shim
-    # file so that macros like `@__DIR__` and `@__FILE__` work as expected.
-    open(filename, "w") do io
-        isnothing(entry_point) || println(io, "module $entry_point")
-        code_loader = get(handlers, :code_loader) do
-            function (jls, xorshift)
-                """
-                cd(@__DIR__) do
-                    pkgid = Base.PkgId(Base.UUID("9e88b42a-f829-5b0c-bbe9-9e923198166b"), "Serialization")
-                    buffer = seekstart(IOBuffer(xor.(read(\"$(basename(jls))\"), $(repr(xorshift)))))
-                    for x in Base.require(pkgid).deserialize(buffer).args
-                        Core.eval(@__MODULE__, x)
-                    end
-                end
-                """
-            end
-        end
-        print(io, code_loader(jls, xorshift))
-        isnothing(entry_point) || println(io, "end")
-    end
-    _sign_file(filename, key_pair.private)
-
-    return nothing
 end
