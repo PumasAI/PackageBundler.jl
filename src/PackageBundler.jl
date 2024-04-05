@@ -30,7 +30,7 @@ environments = ["env1", "env2"]               # required
 outputs = "PackageBundle"                     # default: same as `name`
 key = "key"                                   # default: "key"
 clean = false                                 # default: false
-multiplexer = ""                              # default: ""
+multiplexers = ["asdf", "juliaup"]            # default: []
 
 [packages]
 "<uuid>" = "<name>"
@@ -80,13 +80,12 @@ should be cleaned before generating the bundle. If `clean` is `true` and the
 output directory exists it will be deleted before generating the bundle. `clean`
 has no effect if the output is a tarball or an `Artifacts.toml` file.
 
-The `multiplexer` field sets the environment variable that is used to specify
-the version of `julia` that is run, e.g `ASDF_JULIA_VERSION`, `JULIAUP_CHANNEL`,
-`MISE_JULIA_VERSION`, etc. This is only relevant if your bundle config and
-environments contains multiple different Julia versions that are all used by the
-same versions of packages that need to be stripped and serialized, since
-serialization requires the exact version of `julia` for deserializating the
-expressions correctly.
+The `multiplexers` field sets the allowed multiplexer programs to use to select
+specific versions of Julia for each environment based on it's `julia_version`.
+`"juliaup"`, `"asdf"`, and `"mise"` are supported. This is an ordered list of
+options, each of which are tried in turn until one is found that can be used to
+select the correct Julia version. If no multiplexer is found then the current
+`julia` is used.
 """
 function bundle(
     config::AbstractString = "PackageBundler.toml";
@@ -152,9 +151,10 @@ function bundle(
     outputs = String.(vcat(outputs))
     outputs = isempty(outputs) ? [name] : outputs
 
-    # Multiplexer. The environment variable used by the Julia version multiplexer
-    # to select the version of `julia` to run.
-    multiplexer = get(config, "multiplexer", "")::String
+    # Multiplexers. The list of multiplexer programs to try to use to select
+    # specific versions of Julia for each environment based on it's
+    # `julia_version`.
+    multiplexers = String.(get(Vector{String}, config, "multiplexers"))
 
     mktempdir() do temp_dir
         # Generate the bundle in a temp directory, afterwhich copy the result
@@ -167,7 +167,7 @@ function bundle(
             uuid = uuid,
             key_pair = (; private, public),
             handlers = handlers,
-            multiplexer = multiplexer,
+            multiplexers = multiplexers,
         )
         for output in outputs
             output = normpath(joinpath(dir, output))
