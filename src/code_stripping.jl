@@ -480,7 +480,7 @@ function _strip_package(
     handlers::Dict,
     multiplexers::Vector{String},
 )
-    @info "Stripping source code." package
+    @info "Stripping source code." julia_version package
 
     package = abspath(package)
     output = abspath(output)

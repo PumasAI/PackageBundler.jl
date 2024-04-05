@@ -133,7 +133,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "1.10"
+          - "1.10.2"
         os:
           - macos-latest
           - ubuntu-latest
@@ -168,7 +168,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "1.10"
+          - "1.10.2"
         os:
           - macos-latest
           - ubuntu-latest
