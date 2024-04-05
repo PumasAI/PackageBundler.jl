@@ -18,8 +18,7 @@ function _extract_module_doc(expr::Expr, name::Symbol)
 end
 
 function _stripcode(
-    filename::AbstractString,
-    julia_version::VersionNumber;
+    filename::AbstractString;
     entry_point = nothing,
     handlers::Dict,
 )
@@ -27,7 +26,7 @@ function _stripcode(
     xorshift = unsafe_trunc(UInt8, length(filename))
 
     # Create a serialized version of the parsed code to, somewhat, obfuscate it.
-    jls = "$(filename).$(julia_version).jls"
+    jls = "$(filename).$(VERSION).jls"
     jls_unescaped = "$(filename).\$(VERSION).jls"
     open(jls, "w") do io
         expr = Meta.parseall(read(filename, String))
@@ -50,18 +49,15 @@ function _stripcode(
             # should be added to packages.
             code_injector = get(handlers, "code_injector") do
                 function (filename)
-                    quote
+                    :(module $(gensym())
                         function __init__()
                             @debug "Loading serialized code."
                         end
-                    end
+                    end)
                 end
             end
-            extra_code = :(module $(gensym())
-            $(code_injector(filename))
-            end)
 
-            expr = Expr(:toplevel, expr.args..., extra_code)
+            expr = Expr(:toplevel, expr.args..., code_injector(filename))
         end
         # TODO: perform more aggressive obfuscation here, like renaming local
         # variables, etc. There really isn't a way to fully hide the code, a
@@ -87,10 +83,11 @@ function _stripcode(
     # precompilation time. Working directory is set to the directory of the shim
     # file so that macros like `@__DIR__` and `@__FILE__` work as expected.
     open(filename, "w") do io
-        isnothing(entry_point) || println(io, "module $entry_point")
         code_loader = get(handlers, "code_loader") do
-            function (jls, xorshift)
+            function (jls, xorshift, entry_point)
+                is_entry_point = !isnothing(entry_point)
                 """
+                $(is_entry_point ? "module $entry_point" : "")
                 cd(@__DIR__) do
                     pkgid = Base.PkgId(Base.UUID("9e88b42a-f829-5b0c-bbe9-9e923198166b"), "Serialization")
                     buffer = seekstart(IOBuffer(xor.(read(\"$(basename(jls))\"), $(repr(xorshift)))))
@@ -98,11 +95,11 @@ function _stripcode(
                         Core.eval(@__MODULE__, x)
                     end
                 end
+                $(is_entry_point ? "end" : "")
                 """
             end
         end
-        print(io, code_loader(jls_unescaped, xorshift))
-        isnothing(entry_point) || println(io, "end")
+        println(io, strip(code_loader(jls_unescaped, xorshift, entry_point)))
     end
 
     return nothing
@@ -117,5 +114,5 @@ for file in toml["julia_files"]
     filename = file["filename"]
     entry_point = file["entry_point"]
     entry_point = isempty(entry_point) ? nothing : entry_point
-    _stripcode(filename, VERSION; entry_point, handlers)
+    _stripcode(filename; entry_point, handlers)
 end

@@ -31,6 +31,7 @@ outputs = "PackageBundle"                     # default: same as `name`
 key = "key"                                   # default: "key"
 clean = false                                 # default: false
 multiplexers = ["asdf", "juliaup"]            # default: []
+handlers = []                                 # default: []
 
 [packages]
 "<uuid>" = "<name>"
@@ -86,11 +87,23 @@ specific versions of Julia for each environment based on it's `julia_version`.
 options, each of which are tried in turn until one is found that can be used to
 select the correct Julia version. If no multiplexer is found then the current
 `julia` is used.
+
+The `handlers` field is a list of paths to handler scripts that are used to
+inject or transform code in the bundled packages. The handler scripts must be
+valid Julia files that return a `Function` accepting the required arguments as
+listed below. The valid names for handlers are:
+
+  - `code_loader.jl`: A function that generates the `String` of code used to
+    load the serialized code. Takes `jls`, `xorshift`, and `entry_point` as
+    arguments.
+  - `code_transformer.jl`: A function that transforms the parsed code before it
+    is serialized. Takes `filename` and `expr` as arguments.
+  - `code_injector.jl`: A function that injects extra code into the bundled
+    packages. Takes `filename` as an argument.
 """
 function bundle(
     config::AbstractString = "PackageBundler.toml";
     clean::Bool = false,
-    handlers = Dict(),
 )
     config = abspath(config)
     endswith(config, ".toml") || error("Config file must be a TOML file: `$config`.")
@@ -155,6 +168,19 @@ function bundle(
     # specific versions of Julia for each environment based on it's
     # `julia_version`.
     multiplexers = String.(get(Vector{String}, config, "multiplexers"))
+
+    # Ensure handler scripts valid files and adjust paths to be absolute.
+    handlers = Dict{String,String}()
+    for file in String.(get(Vector{String}, config, "handlers"))
+        file = normpath(joinpath(dir, file))
+        isfile(file) || error("Handler file not found: $file")
+        key = basename(first(splitext(file)))
+        if key in ("code_loader", "code_transformer", "code_injector")
+            handlers[key] = file
+        else
+            error("Invalid handler key: $key")
+        end
+    end
 
     mktempdir() do temp_dir
         # Generate the bundle in a temp directory, afterwhich copy the result
