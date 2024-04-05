@@ -368,7 +368,7 @@ function _check_required_deps(deps)
     end
 end
 
-_match_env_name(name::AbstractString) = match(r"^[a-zA-Z][a-zA-Z0-9_\-\.\+~]+$", name)
+_match_env_name(name::AbstractString) = match(r"^[a-zA-Z][a-zA-Z0-9_\-\.\+~@]+$", name)
 
 function _find_uuids_to_strip(stripped::Dict{String,String})
     return Dict(k => _inc_uuid(k) for (k, v) in stripped)
