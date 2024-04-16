@@ -41,23 +41,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: asdf-vm/actions/setup@05e0d2ed97b598bfce82fd30daf324ae0c4570e6
+      - uses: julia-actions/install-juliaup@5e96cfab3bb0500aa42f2843f46c24b91cfcc3cd
+        with:
+          julia-version: "1.10.2"
       - run: |
-          asdf plugin-add julia
-          asdf install julia 1.10.1
-          asdf install julia 1.10.2
+          juliaup default 1.10.2
+          juliaup add 1.10.1
 
-      - run: julia --project=test/multiversion/envs/CommonMark_1.10.1 -e 'import Pkg; Pkg.instantiate()'
+      - run: julia +1.10.1 --project=test/multiversion/envs/CommonMark_1.10.1 -e 'import Pkg; Pkg.instantiate()'
         env:
-          ASDF_JULIA_VERSION: "1.10.1"
           JULIA_PKG_PRECOMPILE_AUTO: "0"
 
-      - run: julia --project=test/multiversion/envs/CommonMark_1.10.2 -e 'import Pkg; Pkg.instantiate()'
+      - run: julia +1.10.2 --project=test/multiversion/envs/CommonMark_1.10.2 -e 'import Pkg; Pkg.instantiate()'
         env:
-          ASDF_JULIA_VERSION: "1.10.2"
           JULIA_PKG_PRECOMPILE_AUTO: "0"
-
-      - run: asdf global julia 1.10.2
 
       - run: julia --project -e 'import Pkg; Pkg.instantiate()'
       - run: julia --project test/multiversion/bundle.jl
