@@ -1,4 +1,4 @@
-using Test, PackageBundler
+using Test, TOML, PackageBundler
 
 @testset "PackageBundler" begin
     key = PackageBundler.keypair()
@@ -15,6 +15,12 @@ using Test, PackageBundler
 
     remove_script = joinpath(registry_path, "remove.jl")
     @test isfile(remove_script)
+
+    artifact_toml = TOML.parsefile(
+        joinpath(@__DIR__, "build", "LocalCustomRegistryArtifacts", "Artifacts.toml"),
+    )
+    @test artifact_toml["LocalCustomRegistry"]["download"][1]["url"] ==
+          "URL_GOES_HERE/LocalCustomRegistry.tar.gz"
 
     mktempdir() do temp_depot
         withenv("JULIA_DEPOT_PATH" => temp_depot, "JULIA_PKG_SERVER" => "") do
