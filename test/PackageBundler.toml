@@ -1,7 +1,12 @@
 name = "LocalCustomRegistry"
 uuid = "a0e467e0-8c5a-11e4-9d3f-823b93f75cbb"
 environments = ["envs/CustomEnv"]
-outputs = ["build/LocalCustomRegistry", "build/LocalCustomRegistry.tar.gz"]
+outputs = [
+    "build/LocalCustomRegistry",
+    "build/LocalCustomRegistry.tar.gz",
+    "build/LocalCustomRegistryArtifacts/Artifacts.toml"
+]
+artifacts_url = "URL_GOES_HERE"
 key = "key"
 clean = true
 

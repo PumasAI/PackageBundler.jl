@@ -68,6 +68,8 @@ should your dependencies change.
 
 The `outputs` field is the target for the bundle. It can be a directory, a
 tarball, or an `Artifacts.toml` file. Or it can be an array of multiple targets.
+For `Artifacts.toml` files the `artifacts_url` field must be specified, which
+points at the URL where the tarball can be downloaded from.
 
 The `key` field is the name of the private and public key files. The private key
 is used to sign the bundled packages and the public key is included in the
@@ -101,10 +103,7 @@ listed below. The valid names for handlers are:
   - `code_injector.jl`: A function that injects extra code into the bundled
     packages. Takes `filename` as an argument.
 """
-function bundle(
-    config::AbstractString = "PackageBundler.toml";
-    clean::Bool = false,
-)
+function bundle(config::AbstractString = "PackageBundler.toml"; clean::Bool = false)
     config = abspath(config)
     endswith(config, ".toml") || error("Config file must be a TOML file: `$config`.")
     isfile(config) || error("Config file not found: `$config`.")
@@ -164,6 +163,9 @@ function bundle(
     outputs = String.(vcat(outputs))
     outputs = isempty(outputs) ? [name] : outputs
 
+    # Artifact URL for `Artifacts.toml` files.
+    artifact_url = get(config, "artifacts_url", nothing)::Union{String,Nothing}
+
     # Multiplexers. The list of multiplexer programs to try to use to select
     # specific versions of Julia for each environment based on it's
     # `julia_version`.
@@ -208,18 +210,41 @@ function bundle(
                 end
                 isdir(output) || mkpath(output)
                 cp(temp_dir, output; force = true)
-            else
-                if is_artifacts
-                    # TODO: implement.
-                    error("unsupported output type: $output")
-                else
-                    @info "Generating tarball bundle." output
-                    isdir(dirname(output)) || mkpath(dirname(output))
-                    tar_gz = open(output, write = true)
-                    tar = CodecZlib.GzipCompressorStream(tar_gz)
-                    Tar.create(temp_dir, tar)
-                    close(tar)
+            elseif is_tarball
+                @info "Generating tarball bundle." output
+                isdir(dirname(output)) || mkpath(dirname(output))
+                tar_gz = open(output, write = true)
+                tar = CodecZlib.GzipCompressorStream(tar_gz)
+                Tar.create(temp_dir, tar)
+                close(tar)
+            elseif is_artifacts
+                @info "Generating Artifacts.toml bundle." output
+                if isnothing(artifact_url)
+                    error("`artifacts_url` must be specified for Artifacts.toml output.")
                 end
+                artifact_toml = joinpath(temp_dir, "Artifacts.toml")
+                product_hash = Pkg.Artifacts.create_artifact() do artifact_dir
+                    cp(temp_dir, artifact_dir; force = true)
+                end
+                artifact_name = "$name.tar.gz"
+                temp_artifact = joinpath(temp_dir, artifact_name)
+                download_hash = Pkg.Artifacts.archive_artifact(product_hash, temp_artifact)
+                Pkg.Artifacts.bind_artifact!(
+                    artifact_toml,
+                    name,
+                    product_hash,
+                    force = true,
+                    download_info = Tuple[("$artifact_url/$artifact_name", download_hash)],
+                )
+                if clean && isdir(dirname(output))
+                    @warn "Cleaning directory." dirname(output)
+                    rm(dirname(output); recursive = true)
+                end
+                isdir(dirname(output)) || mkpath(dirname(output))
+                cp(artifact_toml, output; force = true)
+                cp(temp_artifact, joinpath(dirname(output), artifact_name); force = true)
+            else
+                error("Invalid output target: $output")
             end
         end
     end
