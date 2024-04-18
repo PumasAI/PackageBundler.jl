@@ -289,5 +289,6 @@ end
 
 include("openssl.jl")
 include("code_stripping.jl")
+include("utilities.jl")
 
 end # module PackageBundler
