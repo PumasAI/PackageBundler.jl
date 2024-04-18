@@ -71,3 +71,52 @@ function instantiate(environments::String)
         end
     end
 end
+
+function generate(
+    directory::AbstractString;
+    name::AbstractString = basename(directory),
+    uuid::Base.UUID = Base.UUID(rand(UInt128)),
+)
+    Base.isidentifier(name) || error("'$name' is not valid. Must be a Julia identifier.")
+    ispath(directory) && error("The path '$directory' already exists.")
+    mkpath(directory)
+    run(
+        `$(Base.julia_cmd()) --project=$directory -e 'pushfirst!(LOAD_PATH, "@stdlib"); import Pkg; Pkg.add(; url = "https://github.com/PumasAI/PackageBundler.jl")'`,
+    )
+    mkpath(joinpath(directory, "environments"))
+    write(
+        joinpath(directory, "PackageBundler.toml"),
+        """
+        name = "$name"
+        uuid = "$uuid"
+        environments = [
+            # Add your environments here.
+            "environments/...",
+        ]
+        outputs = ["build"]
+        key = "key"
+        clean = true
+        multiplexers = ["juliaup", "asdf"]
+
+        # Registries that you want to strip code from.
+        # [registries]
+
+        # Packages that you want to strip code from.
+        # [packages]
+        """,
+    )
+    write(
+        joinpath(directory, "bundle.jl"),
+        """
+        import PackageBundler
+        PackageBundler.bundle(joinpath(@__DIR__, "PackageBundler.toml"))
+        """,
+    )
+    write(
+        joinpath(directory, "instantiate.jl"),
+        """
+        import PackageBundler
+        PackageBundler.instantiate(joinpath(@__DIR__, "environments"))
+        """,
+    )
+end

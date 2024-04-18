@@ -28,6 +28,19 @@ artifact that can be installed as a custom Julia package registry by users.
 
 ## Usage
 
+You can use the below code to generate a starter bundler project
+
+```julia
+import Pkg
+Pkg.activate(; temp = true)
+Pkg.add(; url = "https://github.com/PumasAI/PackageBundler.jl")
+import PackageBundler
+PackageBundler.generate("path/to/my/project")
+```
+
+This will create a new project with some starter configuration to get you
+started. See below for how to configure a project manually.
+
 Create a `PackageBundler.toml` file. This file contains the list of project
 environments to bundle and the specific packages that should have their source
 code stripped and bundled instead as serialized AST artifacts.
