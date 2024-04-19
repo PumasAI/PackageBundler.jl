@@ -44,19 +44,10 @@ jobs:
       - uses: julia-actions/install-juliaup@5e96cfab3bb0500aa42f2843f46c24b91cfcc3cd
         with:
           julia-version: "1.10.2"
-      - run: |
-          juliaup default 1.10.2
-          juliaup add 1.10.1
-
-      - run: julia +1.10.1 --project=test/multiversion/envs/CommonMark_1.10.1 -e 'import Pkg; Pkg.instantiate()'
-        env:
-          JULIA_PKG_PRECOMPILE_AUTO: "0"
-
-      - run: julia +1.10.2 --project=test/multiversion/envs/CommonMark_1.10.2 -e 'import Pkg; Pkg.instantiate()'
-        env:
-          JULIA_PKG_PRECOMPILE_AUTO: "0"
+      - run: juliaup default 1.10.2
 
       - run: julia --project -e 'import Pkg; Pkg.instantiate()'
+      - run: julia --project -e 'import PackageBundler; PackageBundler.instantiate("test/multiversion/envs")'
       - run: julia --project test/multiversion/bundle.jl
 
       - uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3
@@ -140,17 +131,13 @@ jobs:
       - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
         with:
           persist-credentials: false
-      - uses: julia-actions/setup-julia@f2258781c657ad9b4b88072c5eeaf9ec8c370874
+      - uses: julia-actions/install-juliaup@5e96cfab3bb0500aa42f2843f46c24b91cfcc3cd
         with:
-          version: ${{ matrix.version }}
+          julia-version: "${{ matrix.version }}"
+      - run: juliaup default ${{ matrix.version }}
       - uses: julia-actions/cache@dc1a3cdeacb521b0ca93cfc66143fcadb15a5bd0
       - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c
-
-      # `PackageBundler.bundle()` expects the environments to be bundled to have
-      # already been instantiated (hence downloaded) prior to running it. We
-      # don't need to precompile it though.
-      - run: julia --project=test/envs/CustomEnv -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.instantiate()'
-
+      - run: julia --project -e 'import PackageBundler; PackageBundler.instantiate("test/envs")'
       - uses: julia-actions/julia-runtest@79a7e100883947123f8263c5f06e6c0ea3eb972f
       - uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3
         with:
