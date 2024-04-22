@@ -26,6 +26,67 @@ function keypair(dir::AbstractString = pwd())
     return (; private, public)
 end
 
+function print_base64_keypair(path::String)
+    pri = read("$path.pem", String)
+    pub = read("$path.pub", String)
+    println("PRIVATE_KEY_BASE64 = \"$(Base64.base64encode(pri))\"\n")
+    println("PUBLIC_KEY_BASE64 = \"$(Base64.base64encode(pub))\"\n")
+end
+
+"""
+    import_keypair(;
+        file="key",
+        base64=true,
+        private="PRIVATE_KEY_BASE64",
+        public="PUBLIC_KEY_BASE64",
+    )
+
+Import a key pair from environment variables and save them to files. The private
+key is saved as `\$file.pem` and the public key is saved as `\$file.pub`. The
+private key is decoded from the environment variable specified by `private` and
+the public key is decoded from the environment variable specified by `public`.
+
+When not running in CI, this function does nothing.
+"""
+function import_keypair(;
+    file::String = "key",
+    base64::Bool = true,
+    private::String = "PRIVATE_KEY_BASE64",
+    public::String = "PUBLIC_KEY_BASE64",
+)
+    if get(ENV, "CI", "false") == "false"
+        @warn "This function is only useful in CI."
+        return nothing
+    end
+
+    pri = haskey(ENV, private) ? ENV[private] : error("Private key `$private` not found.")
+    pub = haskey(ENV, public) ? ENV[public] : error("Public key `$public` not found.")
+
+    pri = base64 ? Base64.base64decode(pri) : pri
+    pub = base64 ? Base64.base64decode(pub) : pub
+
+    private_file = "$file.pem"
+    public_file = "$file.pub"
+
+    write(private_file, pri)
+    write(public_file, pub)
+
+    atexit() do
+        try
+            rm(private_file, force = true)
+        catch error
+            @error "Failed to remove private key file." error
+        end
+        try
+            rm(public_file, force = true)
+        catch error
+            @error "Failed to remove public key file." error
+        end
+    end
+
+    return nothing
+end
+
 function _sign_file(file, private_key)
     openssl = OpenSSL_jll.openssl()
     cmd = Cmd([

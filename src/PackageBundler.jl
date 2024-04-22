@@ -3,6 +3,7 @@ module PackageBundler
 # Imports.
 
 import Artifacts
+import Base64
 import CodecZlib
 import OpenSSL_jll
 import Pkg
