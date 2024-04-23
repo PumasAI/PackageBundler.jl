@@ -104,7 +104,11 @@ listed below. The valid names for handlers are:
   - `code_injector.jl`: A function that injects extra code into the bundled
     packages. Takes `filename` as an argument.
 """
-function bundle(config::AbstractString = "PackageBundler.toml"; clean::Bool = false)
+function bundle(
+    config::AbstractString = "PackageBundler.toml";
+    clean::Bool = false,
+    artifacts_url::Union{String,Nothing} = nothing,
+)
     config = abspath(config)
     endswith(config, ".toml") || error("Config file must be a TOML file: `$config`.")
     isfile(config) || error("Config file not found: `$config`.")
@@ -165,7 +169,7 @@ function bundle(config::AbstractString = "PackageBundler.toml"; clean::Bool = fa
     outputs = isempty(outputs) ? [name] : outputs
 
     # Artifact URL for `Artifacts.toml` files.
-    artifact_url = get(config, "artifacts_url", nothing)::Union{String,Nothing}
+    artifacts_url = get(config, "artifacts_url", artifacts_url)::Union{String,Nothing}
 
     # Multiplexers. The list of multiplexer programs to try to use to select
     # specific versions of Julia for each environment based on it's
@@ -220,7 +224,7 @@ function bundle(config::AbstractString = "PackageBundler.toml"; clean::Bool = fa
                 close(tar)
             elseif is_artifacts
                 @info "Generating Artifacts.toml bundle." output
-                if isnothing(artifact_url)
+                if isnothing(artifacts_url)
                     error("`artifacts_url` must be specified for Artifacts.toml output.")
                 end
                 artifact_toml = joinpath(temp_dir, "Artifacts.toml")
@@ -235,7 +239,7 @@ function bundle(config::AbstractString = "PackageBundler.toml"; clean::Bool = fa
                     name,
                     product_hash,
                     force = true,
-                    download_info = Tuple[("$artifact_url/$artifact_name", download_hash)],
+                    download_info = Tuple[("$artifacts_url/$artifact_name", download_hash)],
                 )
                 if clean && isdir(dirname(output))
                     @warn "Cleaning directory." dirname(output)
