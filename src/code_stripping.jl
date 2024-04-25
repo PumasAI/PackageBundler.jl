@@ -64,6 +64,16 @@ function _generate_stripped_bundle(;
                     push!(paths_to_remove, dirname(path))
                     version = pkg_info["project"]["version"]
 
+                    # Between each version that we include we make sure that all
+                    # files from the previous version are removed first (except
+                    # for the `.git`) otherwise we can end up with serialized
+                    # files for versions of `julia` that are not valid for the
+                    # version of the package that is serialized.
+                    for item in readdir(temp_dir)
+                        item in (".git",) && continue
+                        rm(joinpath(temp_dir, item); recursive = true, force = true)
+                    end
+                    # Next we copy over the new files.
                     for item in readdir(path)
                         cp(joinpath(path, item), joinpath(temp_dir, item); force = true)
                     end
