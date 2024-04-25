@@ -50,7 +50,7 @@ jobs:
       - run: julia --project -e 'import PackageBundler; PackageBundler.instantiate("test/multiversion/envs")'
       - run: julia --project test/multiversion/bundle.jl
 
-      - uses: actions/upload-artifact@1746f4ab65b179e0ea60a494b83293b640dd5bba
+      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
         with:
           name: multiversion
           path: test/multiversion/build/CommonMarkStrippedRegistry
@@ -139,7 +139,7 @@ jobs:
       - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c
       - run: julia --project -e 'import PackageBundler; PackageBundler.instantiate("test/envs")'
       - uses: julia-actions/julia-runtest@79a7e100883947123f8263c5f06e6c0ea3eb972f
-      - uses: actions/upload-artifact@1746f4ab65b179e0ea60a494b83293b640dd5bba
+      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
         with:
           name: bundle-${{ matrix.os }}
           path: test/build/LocalCustomRegistry
