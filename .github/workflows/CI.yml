@@ -75,7 +75,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
 
-      - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
         with:
           name: multiversion
           path: multiversion
@@ -169,7 +169,7 @@ jobs:
 
       - uses: julia-actions/cache@dc1a3cdeacb521b0ca93cfc66143fcadb15a5bd0
 
-      - uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
         with:
           name: ${{ matrix.bundle }}
           path: ${{ matrix.bundle }}
