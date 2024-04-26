@@ -184,7 +184,7 @@ function bundle(
         file = normpath(joinpath(dir, file))
         isfile(file) || error("Handler file not found: $file")
         key = basename(first(splitext(file)))
-        if key in ("code_loader", "code_transformer", "code_injector")
+        if key in ("code_loader", "code_transformer", "code_injector", "post_process")
             handlers[key] = file
         else
             error("Invalid handler key: $key")
