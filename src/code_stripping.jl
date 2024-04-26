@@ -594,12 +594,26 @@ function _strip_package(
         # own serialized versions of the source.
         mktempdir() do toml_temp
             toml_file = joinpath(toml_temp, "payload.toml")
-            open(toml_file, "w") do io
-                TOML.print(io, Dict("julia_files" => julia_files, "handlers" => handlers))
+            try
+                open(toml_file, "w") do io
+                    TOML.print(
+                        io,
+                        Dict(
+                            "package_name" => package_name,
+                            "package_version" => version,
+                            "private_key" => key_pair.private,
+                            "public_key" => key_pair.public,
+                            "julia_files" => julia_files,
+                            "handlers" => handlers,
+                        ),
+                    )
+                end
+                script = joinpath(@__DIR__, "serializer.jl")
+                binary = _process_multiplexers(multiplexers, julia_version)
+                run(`$(binary) --startup-file=no $(script) $(toml_file)`)
+            finally
+                rm(toml_file; force = true)
             end
-            script = joinpath(@__DIR__, "serializer.jl")
-            binary = _process_multiplexers(multiplexers, julia_version)
-            run(`$(binary) --startup-file=no $(script) $(toml_file)`)
         end
 
         # Sign all the files that have been created/modified during serialization.

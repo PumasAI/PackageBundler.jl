@@ -21,6 +21,7 @@ function _stripcode(
     filename::AbstractString;
     entry_point = nothing,
     handlers::Dict,
+    context::Dict,
 )
     isfile(filename) || error("File not found: $filename")
     xorshift = unsafe_trunc(UInt8, length(filename))
@@ -48,7 +49,7 @@ function _stripcode(
             # Code injection handlers. For builder-provided extra code that
             # should be added to packages.
             code_injector = get(handlers, "code_injector") do
-                function (filename)
+                function (filename, context)
                     :(module $(gensym())
                         function __init__()
                             @debug "Loading serialized code."
@@ -57,7 +58,7 @@ function _stripcode(
                 end
             end
 
-            expr = Expr(:toplevel, expr.args..., code_injector(filename))
+            expr = Expr(:toplevel, expr.args..., code_injector(filename, context))
         end
         # TODO: perform more aggressive obfuscation here, like renaming local
         # variables, etc. There really isn't a way to fully hide the code, a
@@ -65,11 +66,11 @@ function _stripcode(
         # just want to make it non-obvious.
 
         code_transformer = get(handlers, "code_transformer") do
-            function (filename, expr)
+            function (filename, expr, context)
                 return expr
             end
         end
-        expr = code_transformer(filename, expr)
+        expr = code_transformer(filename, expr, context)
 
         # Serialized expressions are expected to be wrapped in a `toplevel`.
         Meta.isexpr(expr, :toplevel) || error("Expected toplevel expr. $expr")
@@ -84,7 +85,7 @@ function _stripcode(
     # file so that macros like `@__DIR__` and `@__FILE__` work as expected.
     open(filename, "w") do io
         code_loader = get(handlers, "code_loader") do
-            function (jls, xorshift, entry_point)
+            function (jls, xorshift, entry_point, context)
                 is_entry_point = !isnothing(entry_point)
                 """
                 $(is_entry_point ? "module $entry_point" : "")
@@ -99,7 +100,7 @@ function _stripcode(
                 """
             end
         end
-        println(io, strip(code_loader(jls_unescaped, xorshift, entry_point)))
+        println(io, strip(code_loader(jls_unescaped, xorshift, entry_point, context)))
     end
 
     return nothing
@@ -114,5 +115,7 @@ for file in toml["julia_files"]
     filename = file["filename"]
     entry_point = file["entry_point"]
     entry_point = isempty(entry_point) ? nothing : entry_point
-    _stripcode(filename; entry_point, handlers)
+    _stripcode(filename; entry_point, handlers, context = toml)
 end
+
+get(() -> (context) -> nothing, handlers, "post_process")(toml)
