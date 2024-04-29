@@ -115,7 +115,11 @@ for file in toml["julia_files"]
     filename = file["filename"]
     entry_point = file["entry_point"]
     entry_point = isempty(entry_point) ? nothing : entry_point
-    _stripcode(filename; entry_point, handlers, context = toml)
+    temp = toml["temp_directory"]
+    relative_filename = relpath(filename, temp)
+    cd(temp) do
+        _stripcode(relative_filename; entry_point, handlers, context = toml)
+    end
 end
 
 get(() -> (context) -> nothing, handlers, "post_process")(toml)
