@@ -604,6 +604,7 @@ function _strip_package(
                             "private_key" => key_pair.private,
                             "public_key" => key_pair.public,
                             "julia_files" => julia_files,
+                            "temp_directory" => temp,
                             "handlers" => handlers,
                         ),
                     )
