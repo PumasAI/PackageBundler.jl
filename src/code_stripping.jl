@@ -510,11 +510,10 @@ function _strip_package(
             end
         end
 
-        # Clear out some folders that we don't want to copy over.
-        for each in [".git", ".ci", ".format", "test", ".github", "docs"]
-            path = joinpath(temp, each)
-            isdir(path) && rm(path; recursive = true)
-        end
+        # Remove the `.git` folder, since we are generating a new git repo
+        # instead and we do not want to include the git history of the package.
+        git_path = joinpath(temp, ".git")
+        isdir(git_path) && rm(git_path; recursive = true)
 
         # Generate the "entry-point" file for the package. This is the file that
         # will be loaded when the package is loaded. It will load the serialized
