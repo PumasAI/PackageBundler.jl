@@ -97,8 +97,8 @@ valid Julia files that return a `Function` accepting the required arguments as
 listed below. The valid names for handlers are:
 
   - `code_loader.jl`: A function that generates the `String` of code used to
-    load the serialized code. Takes `jls`, `xorshift`, `entry_point`, and
-    `context` as arguments.
+    load the serialized code. Takes `filename`, `jls`, `xorshift`,
+    `entry_point`, and `context` as arguments.
   - `code_transformer.jl`: A function that transforms the parsed code before it
     is serialized. Takes `filename`, `expr`, and `context` as arguments.
   - `code_injector.jl`: A function that injects extra code into the bundled

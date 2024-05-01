@@ -51,9 +51,9 @@ function _stripcode(
             code_injector = get(handlers, "code_injector") do
                 function (filename, context)
                     :(module $(gensym())
-                        function __init__()
-                            @debug "Loading serialized code."
-                        end
+                    function __init__()
+                        @debug "Loading serialized code."
+                    end
                     end)
                 end
             end
@@ -83,25 +83,24 @@ function _stripcode(
     # Create a shim file that will load the serialized code and evaluate it at
     # precompilation time. Working directory is set to the directory of the shim
     # file so that macros like `@__DIR__` and `@__FILE__` work as expected.
-    open(filename, "w") do io
-        code_loader = get(handlers, "code_loader") do
-            function (jls, xorshift, entry_point, context)
-                is_entry_point = !isnothing(entry_point)
-                """
-                $(is_entry_point ? "module $entry_point" : "")
-                cd(@__DIR__) do
-                    pkgid = Base.PkgId(Base.UUID("9e88b42a-f829-5b0c-bbe9-9e923198166b"), "Serialization")
-                    buffer = seekstart(IOBuffer(xor.(read(\"$(basename(jls))\"), $(repr(xorshift)))))
-                    for x in Base.require(pkgid).deserialize(buffer).args
-                        Core.eval(@__MODULE__, x)
-                    end
+    code_loader = get(handlers, "code_loader") do
+        function (filename, jls, xorshift, entry_point, context)
+            is_entry_point = !isnothing(entry_point)
+            """
+            $(is_entry_point ? "module $entry_point" : "")
+            cd(@__DIR__) do
+                pkgid = Base.PkgId(Base.UUID("9e88b42a-f829-5b0c-bbe9-9e923198166b"), "Serialization")
+                buffer = seekstart(IOBuffer(xor.(read(\"$(basename(jls))\"), $(repr(xorshift)))))
+                for x in Base.require(pkgid).deserialize(buffer).args
+                    Core.eval(@__MODULE__, x)
                 end
-                $(is_entry_point ? "end" : "")
-                """
             end
+            $(is_entry_point ? "end" : "")
+            """
         end
-        println(io, strip(code_loader(jls_unescaped, xorshift, entry_point, context)))
     end
+    code = strip(code_loader(filename, jls_unescaped, xorshift, entry_point, context))
+    write(filename, code)
 
     return nothing
 end
