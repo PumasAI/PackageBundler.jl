@@ -14,6 +14,9 @@ import TOML
 popfirst!(LOAD_PATH)
 
 function main()
+    has_juliaup = !isnothing(Sys.which("juliaup"))
+    has_juliaup || @warn "`juliaup` is not installed. Some functionality may be limited."
+
     environments = normpath(joinpath(@__DIR__, "..", "environments"))
     packages = normpath(joinpath(@__DIR__, "..", "packages"))
     registry = normpath(joinpath(@__DIR__, "..", "registry"))
@@ -94,6 +97,40 @@ function main()
             end
         end
         Pkg.Registry.add(Pkg.RegistrySpec(path = temp_dir))
+    end
+
+    if has_juliaup
+        @info "Resolving and precompiling all environments."
+        environment_worklist = []
+        for environment in readdir(environments)
+            path = joinpath(depot, "environments", environment)
+            if isdir(path)
+                manifest_toml = TOML.parsefile(joinpath(path, "Manifest.toml"))
+                julia_version = manifest_toml["julia_version"]
+                push!(environment_worklist, (; path, environment, julia_version))
+            else
+                @warn "Environment not found" environment
+            end
+        end
+        for each in environment_worklist
+            julia_version = each.julia_version
+            try
+                run(`juliaup add $(julia_version)`)
+            catch error
+                @error "Failed to add Julia version via `juliaup`" julia_version error
+                continue
+            end
+
+            channel = "+$(julia_version)"
+            environment = "@$(each.environment)"
+            try
+                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve(); Pkg.precompile();"
+                run(`julia $(channel) --startup-file=no --project=$(environment) -e $code`)
+            catch error
+                @error "Failed to resolve and precompile environment" julia_version environment error
+                continue
+            end
+        end
     end
 end
 
