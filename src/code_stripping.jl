@@ -153,28 +153,39 @@ function _generate_stripped_registry(;
             found = false
             for reg in registries
                 if haskey(reg, package_uuid)
-                    found = true
-
                     info = get!(() -> _process_reg_info(reg), registry_info, reg.uuid)
                     pkg_entry = reg[package_uuid]
                     pkg_path = pkg_entry.path
 
-                    stripped_info = get!(Dict, registry_contents, pkg_path)
-                    for (k, v) in info[pkg_path]
-                        k == "Versions.toml" && continue
-                        stripped_info[k] = v
+                    # Package versions may be split across multiple registries
+                    # if they have been migrated from closed source to open, for
+                    # example. We verify that the registry we're currently
+                    # looking through has the package version that we want.
+                    if haskey(
+                        get(Dict{String,Any}, info[pkg_path], "Versions.toml"),
+                        version,
+                    )
+                        found = true
+
+                        stripped_info = get!(Dict, registry_contents, pkg_path)
+                        for (k, v) in info[pkg_path]
+                            k == "Versions.toml" && continue
+                            stripped_info[k] = v
+                        end
+
+                        versions_toml =
+                            get!(Dict{String,Any}, stripped_info, "Versions.toml")
+                        versions_toml[version] =
+                            Dict{String,Any}("git-tree-sha1" => tree_hash)
+
+                        project_toml = get!(Dict{String,Any}, stripped_info, "Package.toml")
+                        project_toml["repo"] = "{{PACKAGES}}/$package_name"
+
+                        packages[string(package_uuid)] =
+                            Dict("name" => pkg_entry.name, "path" => pkg_path)
+
+                        break
                     end
-
-                    versions_toml = get!(Dict{String,Any}, stripped_info, "Versions.toml")
-                    versions_toml[version] = Dict{String,Any}("git-tree-sha1" => tree_hash)
-
-                    project_toml = get!(Dict{String,Any}, stripped_info, "Package.toml")
-                    project_toml["repo"] = "{{PACKAGES}}/$package_name"
-
-                    packages[string(package_uuid)] =
-                        Dict("name" => pkg_entry.name, "path" => pkg_path)
-
-                    break
                 end
             end
             if !found
