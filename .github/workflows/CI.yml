@@ -43,7 +43,7 @@ jobs:
 
       - uses: julia-actions/install-juliaup@1bd0233d5d435c2b3df6a28eabb9b17098fc5204
         with:
-          julia-version: "1.10.2"
+          channel: "1.10.2"
       - run: juliaup default 1.10.2
 
       - run: julia --project -e 'import Pkg; Pkg.instantiate()'
@@ -133,7 +133,7 @@ jobs:
           persist-credentials: false
       - uses: julia-actions/install-juliaup@1bd0233d5d435c2b3df6a28eabb9b17098fc5204
         with:
-          julia-version: "${{ matrix.version }}"
+          channel: "${{ matrix.version }}"
       - run: juliaup default ${{ matrix.version }}
       - uses: julia-actions/cache@d48542bb7b6239a9391789f01d21a6bdde9ad5df
       - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c
