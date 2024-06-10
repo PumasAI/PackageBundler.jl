@@ -124,7 +124,7 @@ function main()
             channel = "+$(julia_version)"
             environment = "@$(each.environment)"
             try
-                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve(); Pkg.precompile();"
+                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.instantiate(); Pkg.precompile();"
                 run(`julia $(channel) --startup-file=no --project=$(environment) -e $code`)
             catch error
                 @error "Failed to resolve and precompile environment" julia_version environment error
