@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: julia-actions/install-juliaup@1bd0233d5d435c2b3df6a28eabb9b17098fc5204
+      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
         with:
           channel: "1.10.2"
       - run: juliaup default 1.10.2
@@ -131,7 +131,7 @@ jobs:
       - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29
         with:
           persist-credentials: false
-      - uses: julia-actions/install-juliaup@1bd0233d5d435c2b3df6a28eabb9b17098fc5204
+      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
         with:
           channel: "${{ matrix.version }}"
       - run: juliaup default ${{ matrix.version }}
