@@ -170,7 +170,7 @@ function _generate_stripped_registry(;
                         stripped_info = get!(Dict, registry_contents, pkg_path)
                         for (k, v) in info[pkg_path]
                             k == "Versions.toml" && continue
-                            stripped_info[k] = v
+                            stripped_info[k] = merge(get(Dict, stripped_info, k), v)
                         end
 
                         versions_toml =
@@ -183,8 +183,6 @@ function _generate_stripped_registry(;
 
                         packages[string(package_uuid)] =
                             Dict("name" => pkg_entry.name, "path" => pkg_path)
-
-                        break
                     end
                 end
             end
@@ -238,7 +236,7 @@ function _write_stripped_registry(stripped_registry, registry_contents)
                 for (k, v) in data
                     if endswith(k, ".toml")
                         open(joinpath(path, k), "w") do io
-                            TOML.print(io, v)
+                            TOML.print(io, v; sorted = true)
                         end
                     else
                         error("Unknown file type: $k")
