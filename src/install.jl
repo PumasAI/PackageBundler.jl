@@ -40,6 +40,13 @@ function main()
         run(`$(Base.julia_cmd()) --startup-file=no $current_registry_remover`)
     end
 
+    # Non-standard depot locations may not have the default registries. So
+    # ensure that they are installed before attempting to resolve and
+    # precompile.
+    if isempty(Pkg.Registry.reachable_registries())
+        Pkg.Registry.add(Pkg.Registry.DEFAULT_REGISTRIES)
+    end
+
     new_environments = readdir(environments)
     depot_environments = joinpath(depot, "environments")
     isdir(depot_environments) || mkpath(depot_environments)
@@ -96,6 +103,48 @@ function main()
                 write(joinpath(destination, file), content)
             end
         end
+
+        # Deduplicate package versions that are already available in other
+        # registries. Since bundled packages retain the same UUID and version
+        # numbers, but not git-tree-sha1, `Pkg` would complain if it encounters
+        # duplicates. A source-available version of a package always takes
+        # precedence over a bundled version, so we remove the bundled versions
+        # from the registry we are about to install.
+        registry_toml_file = joinpath(temp_dir, "Registry.toml")
+        isfile(registry_toml_file) || error("Registry.toml not found: $registry_toml_file")
+        registry_toml = TOML.parsefile(registry_toml_file)
+        foreach(pairs(registry_toml["packages"])) do (pkg_uuid, pkg_info)
+            pkg_uuid = Base.UUID(pkg_uuid)
+            for reg in Pkg.Registry.reachable_registries()
+                available_in_other_registries = String[]
+                isnothing(reg.in_memory_registry) && continue
+                if haskey(reg.pkgs, pkg_uuid)
+                    path = reg.pkgs[pkg_uuid].path
+                    versions_toml_file = join([path, "Versions.toml"], "/")
+                    versions_toml = TOML.parse(reg.in_memory_registry[versions_toml_file])
+                    temp_versions_toml_file = joinpath(temp_dir, versions_toml_file)
+                    temp_versions_toml = TOML.parsefile(temp_versions_toml_file)
+                    for version in keys(versions_toml)
+                        if haskey(temp_versions_toml, version)
+                            push!(available_in_other_registries, version)
+                            delete!(temp_versions_toml, version)
+                        end
+                    end
+                    open(temp_versions_toml_file, "w") do io
+                        TOML.print(io, temp_versions_toml; sorted = true)
+                    end
+                end
+                if !isempty(available_in_other_registries)
+                    @info(
+                        "Skipping duplicate package versions.",
+                        registry = reg.name,
+                        package = pkg_info["name"],
+                        versions = join(available_in_other_registries, ", ", ", and "),
+                    )
+                end
+            end
+        end
+
         Pkg.Registry.add(Pkg.RegistrySpec(path = temp_dir))
     end
 

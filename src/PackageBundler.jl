@@ -194,10 +194,12 @@ function bundle(
     mktempdir() do temp_dir
         # Generate the bundle in a temp directory, afterwhich copy the result
         # into the required output targets.
-        _generate_stripped_bundle(
+        _generate_stripped_bundle(;
+            root_dir = dir,
             project_dirs = envs,
             output_dir = temp_dir,
             stripped = packages,
+            registries = registries,
             name = name,
             uuid = uuid,
             key_pair = (; private, public),

@@ -1,17 +1,20 @@
 name = "LocalCustomRegistry"
 uuid = "a0e467e0-8c5a-11e4-9d3f-823b93f75cbb"
-environments = ["envs/CustomEnv"]
+environments = [
+    "environments/1.9/Bundle@0.1.0",
+    "environments/1.9/Bundle@0.2.0",
+    "environments/1.10/Bundle@0.1.0",
+    "environments/1.10/Bundle@0.2.0",
+]
 outputs = [
     "build/LocalCustomRegistry",
     "build/LocalCustomRegistry.tar.gz",
     "build/LocalCustomRegistryArtifacts/Artifacts.toml"
 ]
+multiplexers = ["juliaup"]
 artifacts_url = "URL_GOES_HERE"
 key = "key"
 clean = true
 
 [packages]
-"13f3f980-e62b-5c42-98c6-ff1f3baf88f0" = "CairoMakie"
-"479239e8-5488-4da2-87a7-35f2df7eef83" = "Catalyst"
-"0c46a032-eb83-5123-abaf-570d42b7fbaa" = "DifferentialEquations" 
-"961ee093-0014-501f-94e3-6117800e7a78" = "ModelingToolkit"
+"8346427c-08d3-4941-a1ec-6285c85e2ad6" = "TestPackage"

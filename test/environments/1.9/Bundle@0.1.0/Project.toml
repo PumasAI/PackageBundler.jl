@@ -1,0 +1,6 @@
+[deps]
+Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
+TestPackage = "8346427c-08d3-4941-a1ec-6285c85e2ad6"
+
+[compat]
+TestPackage = "= 0.1.0"

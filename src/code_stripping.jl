@@ -1,9 +1,11 @@
 # Implementation.
 
 function _generate_stripped_bundle(;
+    root_dir::AbstractString,
     project_dirs::Union{AbstractString,Vector{String}},
     output_dir::AbstractString,
     stripped::Dict{String,String},
+    registries::Dict{String,String},
     name::AbstractString,
     uuid::Union{AbstractString,Integer,Base.UUID},
     key_pair::@NamedTuple{private::String, public::String},
@@ -16,21 +18,20 @@ function _generate_stripped_bundle(;
     # listed in `project_dirs`. Save each stripped package in a separate
     # versioned folder in the `packages` folder.
     pkg_version_info = Dict()
-    stripped_uuid_mapping = Dict()
     project_dirs = vcat(project_dirs)
     for project_dir in project_dirs
         project_dir = abspath(project_dir)
 
-        new_pkg_version_info, new_stripped_uuid_mapping = _process_project_env(
+        new_pkg_version_info = _process_project_env(;
+            root_dir = root_dir,
             project_dir = project_dir,
             output_dir = output_dir,
             stripped = stripped,
+            registries = registries,
             key_pair = key_pair,
             handlers = handlers,
             multiplexers = multiplexers,
         )
-
-        stripped_uuid_mapping = merge(stripped_uuid_mapping, new_stripped_uuid_mapping)
 
         for (k, v) in new_pkg_version_info
             current_pkg_version_info = get!(Dict{String,Any}, pkg_version_info, k)
@@ -111,7 +112,6 @@ function _generate_stripped_bundle(;
         name = name,
         uuid = uuid,
         pkg_version_info = pkg_version_info,
-        stripped_uuid_mapping = stripped_uuid_mapping,
     )
 end
 
@@ -122,7 +122,6 @@ function _generate_stripped_registry(;
     clean::Bool = false,
     create::Bool = true,
     pkg_version_info::Dict = Dict(),
-    stripped_uuid_mapping::Dict = Dict(),
 )
     output_dir = abspath(output_dir)
 
@@ -139,8 +138,6 @@ function _generate_stripped_registry(;
         "packages" => packages,
     )
     registry_contents = Dict("Registry.toml" => registry_toml)
-
-    repos_path = joinpath(output_dir, "packages")
 
     registries = Pkg.Registry.reachable_registries()
     registry_info = Dict()
@@ -162,15 +159,21 @@ function _generate_stripped_registry(;
                     # example. We verify that the registry we're currently
                     # looking through has the package version that we want.
                     if haskey(
-                        get(Dict{String,Any}, info[pkg_path], "Versions.toml"),
+                        get(Dict{String,Any}, get(Dict, info, pkg_path), "Versions.toml"),
                         version,
                     )
+                        if found
+                            error(
+                                "Package version found in multiple registries: $package_name $uuid",
+                            )
+                        end
+
                         found = true
 
                         stripped_info = get!(Dict, registry_contents, pkg_path)
                         for (k, v) in info[pkg_path]
                             k == "Versions.toml" && continue
-                            stripped_info[k] = merge(get(Dict, stripped_info, k), v)
+                            stripped_info[k] = v
                         end
 
                         versions_toml =
@@ -191,8 +194,6 @@ function _generate_stripped_registry(;
             end
         end
     end
-
-    registry_contents = _replace_uuids(registry_contents, stripped_uuid_mapping)
 
     stripped_registry = joinpath(output_dir, "registry")
     if clean && isdir(stripped_registry)
@@ -253,25 +254,60 @@ end
 
 function _process_reg_info(reg)
     dict = Dict()
-    for key in keys(reg.in_memory_registry)
-        key == "Registry.toml" && continue
 
-        parts = split(key, '/')
-        path = join(parts[1:end-1], '/')
-        file = parts[end]
+    # Potentially is `nothing`.
+    mem = reg.in_memory_registry
+    if isnothing(mem)
+        for (root, _, files) in walkdir(reg.path)
+            for file in files
+                file in ("Registry.toml", "Project.toml") && continue
+                _, ext = splitext(file)
+                if ext == ".toml"
+                    fullpath = joinpath(root, file)
+                    parts = splitpath(relpath(fullpath, reg.path))
+                    path = join(parts[1:end-1], '/')
+                    file = parts[end]
+                    pkg = get!(Dict, dict, path)
+                    pkg[file] = TOML.parsefile(fullpath)
+                end
+            end
+        end
+    else
+        for key in keys(reg.in_memory_registry)
+            key == "Registry.toml" && continue
 
-        if endswith(file, ".toml")
-            pkg = get!(Dict, dict, path)
-            pkg[file] = TOML.parse(reg.in_memory_registry[key])
+            parts = split(key, '/')
+            path = join(parts[1:end-1], '/')
+            file = parts[end]
+
+            path == ".ci" && continue
+            file == "Project.toml" && continue
+
+            if endswith(file, ".toml")
+                pkg = get!(Dict, dict, path)
+                pkg[file] = TOML.parse(reg.in_memory_registry[key])
+            end
         end
     end
     return dict
 end
 
+function _process_reg_info_uuid_mapping(reg)
+    dict = _process_reg_info(reg)
+    output = Dict()
+    for each in values(dict)
+        uuid = each["Package.toml"]["uuid"]
+        output[uuid] = each
+    end
+    return output
+end
+
 function _process_project_env(;
+    root_dir::AbstractString,
     project_dir::AbstractString,
     output_dir::AbstractString,
     stripped::Dict{String,String},
+    registries::Dict{String,String},
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
     multiplexers::Vector{String},
@@ -290,16 +326,15 @@ function _process_project_env(;
     manifest_toml = joinpath(project_dir, "Manifest.toml")
     isfile(manifest_toml) || error("Manifest file not found: $manifest_toml")
 
-    stripped_pkg_uuid_mapping = _find_uuids_to_strip(stripped)
-
-    name = basename(project_dir)
+    rel_project_path = relpath(project_dir, root_dir)
+    project_path_parts = splitpath(rel_project_path)[2:end]
+    name = join(project_path_parts, "_")
     isnothing(_match_env_name(name)) && error("Invalid environment name: $(repr(name))")
 
     environments = joinpath(output_dir, "environments")
     isdir(environments) || mkpath(environments)
     named_environment = joinpath(environments, name)
     cp(project_dir, named_environment; force = true)
-    _env_uuid_replacement!(joinpath(environments, name), stripped_pkg_uuid_mapping)
     _package_version_locking!(joinpath(environments, name))
     _sign_file(joinpath(named_environment, "Project.toml"), key_pair.private)
     _sign_file(joinpath(named_environment, "Manifest.toml"), key_pair.private)
@@ -313,31 +348,41 @@ function _process_project_env(;
             if package_paths[each_uuid]["name"] != each_name
                 error("mismatched package names $each_name")
             end
-            version_info = _strip_package(
-                package_paths[each_uuid]["path"],
-                package_paths[each_uuid]["julia_version"],
-                output_dir,
-                stripped_pkg_uuid_mapping,
-                key_pair,
-                handlers,
-                multiplexers,
-            )
-            versions = get!(Dict{String,Any}, pkg_version_info, each_name)
-            versions[version_info["project"]["version"]] = version_info
+            registry = package_paths[each_uuid]["registry"]
+            if isempty(registries) || haskey(registries, registry)
+                version_info = _strip_package(
+                    package_paths[each_uuid]["path"],
+                    package_paths[each_uuid]["julia_version"],
+                    output_dir,
+                    key_pair,
+                    handlers,
+                    multiplexers,
+                )
+                versions = get!(Dict{String,Any}, pkg_version_info, each_name)
+                versions[version_info["project"]["version"]] = version_info
+            end
         end
     end
 
-    return pkg_version_info, stripped_pkg_uuid_mapping
+    return pkg_version_info
 end
 
-# Environment package version sniffer. Runs in a separate process to avoid
-# interacting with this package's package versions.
-
-# Returns data of the form:
+# Environment package version sniffer. Returns data of the form:
 #
-# Dict("<uuid>" => Dict("name" => "<name>", "uuid" => "<uuid>", "path" => "<path>", "julia_version" => v"<version>"))
+# Dict("<uuid>" => Dict(
+#     "name" => "<name>",
+#     "uuid" => "<uuid>",
+#     "path" => "<path>",
+#     "version" => "<version>",
+#     "registry" => "<registry>",
+#     "julia_version" => v"<version>"
+# ))
 #
 function _sniff_versions(environment::AbstractString)
+    registries = Dict(
+        reg.uuid => _process_reg_info_uuid_mapping(reg) for
+        reg in Pkg.Registry.reachable_registries()
+    )
     project = Base.env_project_file(environment)
     env = Pkg.Types.EnvCache(project)
     output = Dict{String,Dict{String,Any}}()
@@ -366,10 +411,24 @@ function _sniff_versions(environment::AbstractString)
         if isnothing(path)
             error("failed to find $entry")
         else
+            # Find out which registry the package is in with the version that we
+            # are looking for.
+            registry = nothing
+            for (reg, registry_info) in registries
+                if haskey(registry_info, "$uuid")
+                    versions = registry_info["$uuid"]["Versions.toml"]
+                    if haskey(versions, "$(entry.version)")
+                        registry = "$reg"
+                        break
+                    end
+                end
+            end
             output["$uuid"] = Dict(
                 "name" => name,
                 "uuid" => "$uuid",
                 "path" => path,
+                "version" => entry.version,
+                "registry" => registry,
                 "julia_version" => env.manifest.julia_version,
             )
         end
@@ -387,25 +446,7 @@ function _check_required_deps(deps)
     end
 end
 
-_match_env_name(name::AbstractString) = match(r"^[a-zA-Z][a-zA-Z0-9_\-\.\+~@]+$", name)
-
-function _find_uuids_to_strip(stripped::Dict{String,String})
-    return Dict(k => _inc_uuid(k) for (k, v) in stripped)
-end
-
-# The UUID mapping between a package and it's stripped version is UUID+1.
-# TODO: see whether this works well in practice before commiting to it.
-_inc_uuid(uuid::String) = string(_inc_uuid(Base.UUID(uuid)))::String
-_inc_uuid(uuid::Base.UUID) = Base.UUID(UInt128(uuid) + 1)
-_dec_uuid(uuid::String) = string(_dec_uuid(Base.UUID(uuid)))::String
-_dec_uuid(uuid::Base.UUID) = Base.UUID(UInt128(uuid) - 1)
-
-# Traverse some TOML and replace UUIDs with their stripped versions.
-_replace_uuids(d::AbstractDict, uuids) = Dict(_replace_uuids(each, uuids) for each in d)
-_replace_uuids(a::AbstractArray, uuids) = [_replace_uuids(each, uuids) for each in a]
-_replace_uuids(p::Pair, uuids) = _replace_uuids(p[1], uuids) => _replace_uuids(p[2], uuids)
-_replace_uuids(s::AbstractString, uuids) = get(uuids, s, s)
-_replace_uuids(other, uuids) = other
+_match_env_name(name::AbstractString) = match(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.\+~@]+$", name)
 
 # In the stripped version of the environments that we want to distribute we
 # replace the UUIDs of the packages that we stripped with their stripped
@@ -494,7 +535,6 @@ function _strip_package(
     package::AbstractString,
     julia_version::VersionNumber,
     output::AbstractString,
-    uuid_replacements::Dict,
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
     multiplexers::Vector{String},
@@ -531,7 +571,7 @@ function _strip_package(
         isfile(project) || error("Project file not found: $project")
         toml = TOML.parsefile(project)
         open(project, "w") do io
-            TOML.print(io, _replace_uuids(toml, uuid_replacements); sorted = true)
+            TOML.print(io, toml; sorted = true)
         end
         _sign_file(project, key_pair.private)
         write(joinpath(temp, basename(key_pair.public)), read(key_pair.public))

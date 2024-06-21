@@ -1,7 +1,5 @@
-/Manifest.toml
-/test/Manifest.toml
+test/build
+Manifest.toml
 *.pem
 *.pub
-test/build
-test/multiversion/build
 .DS_Store

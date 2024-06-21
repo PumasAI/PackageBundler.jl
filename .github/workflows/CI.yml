@@ -21,98 +21,17 @@ permissions:
 jobs:
   finalize:
     timeout-minutes: 10
-    needs: [test-bundle, test-multiversion]
+    needs: [test, isolated-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo test-multiversion: ${{ needs.test-multiversion.result }}
-          echo test-bundle: ${{ needs.test-bundle.result }}
+          echo test-bundle: ${{ needs.test.result }}
+          echo isolated-tests: ${{ needs.isolated-tests.result }}
       - run: exit 1
         if: |
-          (needs.test-multiversion.result != 'success') ||
-          (needs.test-bundle.result != 'success')
-
-  build-multiversion:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
-        with:
-          persist-credentials: false
-
-      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
-        with:
-          channel: "1.10.2"
-      - run: juliaup default 1.10.2
-
-      - run: julia --project -e 'import Pkg; Pkg.instantiate()'
-      - run: julia --project -e 'import PackageBundler; PackageBundler.instantiate("test/multiversion/envs")'
-      - run: julia --project test/multiversion/bundle.jl
-
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
-        with:
-          name: multiversion
-          path: test/multiversion/build/CommonMarkStrippedRegistry
-
-  test-multiversion:
-    needs: [build-multiversion]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - "1.10.1"
-          - "1.10.2"
-        os:
-          - macos-latest
-          - ubuntu-latest
-          - windows-latest
-
-    steps:
-      - uses: julia-actions/setup-julia@f2258781c657ad9b4b88072c5eeaf9ec8c370874
-        with:
-          version: ${{ matrix.version }}
-
-      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
-        with:
-          name: multiversion
-          path: multiversion
-
-      - name: Initialize Julia Depot
-        run: julia -e 'import Pkg; Pkg.status()'
-
-      - name: Install bundle
-        run: julia multiversion/registry/install.jl
-
-      - name: Installing the same bundle again should uninstall and reinstall
-        run: julia multiversion/registry/install.jl
-
-      - name: Resolve environment and precompile
-        run: |
-          julia --project=@CommonMark_${{ matrix.version }} -e '
-            pushfirst!(LOAD_PATH, "@stdlib")
-            import Pkg
-            Pkg.status()
-            Pkg.resolve()
-            Pkg.precompile("CommonMark")
-          '
-
-      - name: Load stripped package and check for source stripping
-        run: julia --project=@CommonMark_${{ matrix.version }} -e 'import CommonMark; @show(first(functionloc(CommonMark.issafe, Tuple{Char}))) === nothing || exit(1)'
-
-      - name: Remove bundle
-        run: |
-          julia -e '
-            for depot in DEPOT_PATH
-              path = joinpath(depot, "registries", "CommonMarkStrippedRegistry", "remove.jl")
-              if isfile(path)
-                run(`julia $path`)
-                break
-              end
-            end
-          '
+          (needs.test.result != 'success') ||
+          (needs.isolated-tests.result != 'success')
 
   test:
     runs-on: ${{ matrix.os }}
@@ -121,7 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "1.10.2"
+          - "1.10"
         os:
           - macos-latest
           - ubuntu-latest
@@ -134,17 +53,15 @@ jobs:
       - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
         with:
           channel: "${{ matrix.version }}"
-      - run: juliaup default ${{ matrix.version }}
       - uses: julia-actions/cache@d48542bb7b6239a9391789f01d21a6bdde9ad5df
       - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c
-      - run: julia --project -e 'import PackageBundler; PackageBundler.instantiate("test/envs")'
       - uses: julia-actions/julia-runtest@79a7e100883947123f8263c5f06e6c0ea3eb972f
       - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
         with:
           name: bundle-${{ matrix.os }}
           path: test/build/LocalCustomRegistry
 
-  test-bundle:
+  isolated-tests:
     needs: [test]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -152,7 +69,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "1.10.2"
+          - "1.10"
         os:
           - macos-latest
           - ubuntu-latest
@@ -163,9 +80,13 @@ jobs:
           - bundle-windows-latest
 
     steps:
-      - uses: julia-actions/setup-julia@f2258781c657ad9b4b88072c5eeaf9ec8c370874
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
         with:
-          version: ${{ matrix.version }}
+          persist-credentials: false
+
+      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
+        with:
+          channel: "${{ matrix.version }}"
 
       - uses: julia-actions/cache@d48542bb7b6239a9391789f01d21a6bdde9ad5df
 
@@ -183,27 +104,12 @@ jobs:
       - name: Installing the same bundle again should uninstall and reinstall
         run: julia ${{ matrix.bundle }}/registry/install.jl
 
-      - name: Resolve environment and precompile
-        run: |
-          julia --project=@CustomEnv -e '
-            pushfirst!(LOAD_PATH, "@stdlib")
-            import Pkg
-            Pkg.status()
-            Pkg.resolve()
-            Pkg.precompile("CairoMakie")
-          '
+      - name: Instantiate scripts project
+        run: julia --startup-file=no --project=test/scripts -e 'import Pkg; Pkg.instantiate()'
 
-      - name: Load packages
-        run: julia --project=@CustomEnv -e 'import CairoMakie'
+      - name: Verify bundle
+        run: julia --startup-file=no --project=test/scripts test/scripts/verify.jl
 
       - name: Remove bundle
-        run: |
-          julia -e '
-            for depot in DEPOT_PATH
-              path = joinpath(depot, "registries", "LocalCustomRegistry", "remove.jl")
-              if isfile(path)
-                run(`julia $path`)
-                break
-              end
-            end
-          '
+        run: julia --startup-file=no --project=test/scripts test/scripts/remove.jl
+        if: always()
