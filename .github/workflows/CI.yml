@@ -47,16 +47,16 @@ jobs:
           - windows-latest
 
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           persist-credentials: false
-      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
+      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5 # v2.0.2
         with:
           channel: "${{ matrix.version }}"
-      - uses: julia-actions/cache@580d2b69d895343992af2cbad49c32a0149c2cde
-      - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c
-      - uses: julia-actions/julia-runtest@79a7e100883947123f8263c5f06e6c0ea3eb972f
-      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      - uses: julia-actions/cache@580d2b69d895343992af2cbad49c32a0149c2cde # v2.0.1
+      - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c # v1.6.0
+      - uses: julia-actions/julia-runtest@79a7e100883947123f8263c5f06e6c0ea3eb972f # v1.9.3
+      - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
         with:
           name: bundle-${{ matrix.os }}
           path: test/build/LocalCustomRegistry
@@ -80,17 +80,17 @@ jobs:
           - bundle-windows-latest
 
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           persist-credentials: false
 
-      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5
+      - uses: julia-actions/install-juliaup@2ad49a51b33d519705c111f7b6fe9d069f356da5 # v2.0.2
         with:
           channel: "${{ matrix.version }}"
 
-      - uses: julia-actions/cache@580d2b69d895343992af2cbad49c32a0149c2cde
+      - uses: julia-actions/cache@580d2b69d895343992af2cbad49c32a0149c2cde # v2.0.1
 
-      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         with:
           name: ${{ matrix.bundle }}
           path: ${{ matrix.bundle }}
