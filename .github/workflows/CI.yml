@@ -53,7 +53,7 @@ jobs:
       - uses: julia-actions/install-juliaup@d802ef25208c874a43306162ec929b54e2eeac3b # v2.1.0
         with:
           channel: "${{ matrix.version }}"
-      - uses: julia-actions/cache@580d2b69d895343992af2cbad49c32a0149c2cde # v2.0.1
+      - uses: julia-actions/cache@8608484607cba0bdb5437a7bad85d6502499d029 # v2.0.4
       - uses: julia-actions/julia-buildpkg@90dd6f23eb49626e4e6612cb9d64d456f86e6a1c # v1.6.0
       - uses: julia-actions/julia-runtest@d0c4f093badade621cd041bba567d1e832480ac2 # v1.10.0
       - uses: actions/upload-artifact@0b2256b8c012f0828dc542b3febcab082c67f72b # v4.3.4
@@ -88,7 +88,7 @@ jobs:
         with:
           channel: "${{ matrix.version }}"
 
-      - uses: julia-actions/cache@580d2b69d895343992af2cbad49c32a0149c2cde # v2.0.1
+      - uses: julia-actions/cache@8608484607cba0bdb5437a7bad85d6502499d029 # v2.0.4
 
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
