@@ -60,6 +60,7 @@ jobs:
         with:
           name: bundle-${{ matrix.os }}
           path: test/build/LocalCustomRegistry
+          include-hidden-files: true
 
   isolated-tests:
     needs: [test]
