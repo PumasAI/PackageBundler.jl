@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
           persist-credentials: false
-      - uses: julia-actions/install-juliaup@f45b6da2c56048cbc8bc7f570b5f3de155361455 # v2.1.2
+      - uses: julia-actions/install-juliaup@1da6847c869cd68e3a32b8f52fe8f005b8cd5ece # v2.2.1
         with:
           channel: "${{ matrix.version }}"
       - uses: julia-actions/cache@824243901fb567ccb490b0d0e2483ccecde46834 # v2.0.5
@@ -85,7 +85,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: julia-actions/install-juliaup@f45b6da2c56048cbc8bc7f570b5f3de155361455 # v2.1.2
+      - uses: julia-actions/install-juliaup@1da6847c869cd68e3a32b8f52fe8f005b8cd5ece # v2.2.1
         with:
           channel: "${{ matrix.version }}"
 
