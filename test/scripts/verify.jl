@@ -19,5 +19,5 @@ import TOML
             count += 1
         end
     end
-    @test count == 4
+    @test count == 6
 end
