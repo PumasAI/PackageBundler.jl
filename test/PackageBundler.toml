@@ -5,6 +5,8 @@ environments = [
     "environments/1.9/Bundle@0.2.0",
     "environments/1.10/Bundle@0.1.0",
     "environments/1.10/Bundle@0.2.0",
+    "environments/1.11/Bundle@0.1.0",
+    "environments/1.11/Bundle@0.2.0",
 ]
 outputs = [
     "build/LocalCustomRegistry",

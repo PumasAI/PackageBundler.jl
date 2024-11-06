@@ -91,7 +91,7 @@ function _stripcode(
             cd(@__DIR__) do
                 pkgid = Base.PkgId(Base.UUID("9e88b42a-f829-5b0c-bbe9-9e923198166b"), "Serialization")
                 buffer = seekstart(IOBuffer(xor.(read(\"$(basename(jls))\"), $(repr(xorshift)))))
-                for x in Base.require(pkgid).deserialize(buffer).args
+                for x in Base.invokelatest(Base.require(pkgid).deserialize, buffer).args
                     Core.eval(@__MODULE__, x)
                 end
             end
