@@ -22,6 +22,11 @@ function main()
         else
             @warn "Environment not found" environment
         end
+        try
+            run(`juliaup remove $(environment)`)
+        catch error
+            @error "Failed to remove custom channel" environment error
+        end
     end
     Pkg.Registry.rm(Pkg.RegistrySpec(; uuid = "{{REGISTRY_UUID}}"))
 end
