@@ -154,9 +154,25 @@ function main()
         for environment in readdir(environments)
             path = joinpath(depot, "environments", environment)
             if isdir(path)
+                package_bundler_toml = let file = joinpath(path, "PackageBundler.toml")
+                    isfile(file) ? TOML.parsefile(file) : Dict{String,Any}()
+                end
+                juliaup_toml = get(Dict{String,Any}, package_bundler_toml, "juliaup")
+                custom_juliaup_channel = !isempty(juliaup_toml)
+                extra_args = get(juliaup_toml, "args", String[])
                 manifest_toml = TOML.parsefile(joinpath(path, "Manifest.toml"))
-                julia_version = manifest_toml["julia_version"]
-                push!(environment_worklist, (; path, environment, julia_version))
+                manifest_julia_version = manifest_toml["julia_version"]
+                julia_version = get(juliaup_toml, "channel", manifest_julia_version)
+                push!(
+                    environment_worklist,
+                    (;
+                        path,
+                        environment,
+                        julia_version,
+                        extra_args,
+                        custom_juliaup_channel,
+                    ),
+                )
             else
                 @warn "Environment not found" environment
             end
@@ -178,6 +194,22 @@ function main()
             catch error
                 @error "Failed to resolve and precompile environment" julia_version environment error
                 continue
+            end
+
+            if each.custom_juliaup_channel
+                juliaup_json = joinpath(dirname(dirname(Sys.BINDIR)), "juliaup.json")
+                if !isfile(juliaup_json)
+                    @warn "Could not find `juliaup.json` config file. Skipping channel alias step."
+                else
+                    file = @__FILE__
+                    cmd = `juliaup link $(each.environment) $(file) -- $(channel) --project=$(environment) $(each.extra_args...)`
+                    if !success(cmd)
+                        @warn "failing to run juliaup linking, rerunning with output."
+                        run(cmd)
+                    end
+                    juliaup_json_raw = read(juliaup_json, String)
+                    write(juliaup_json, replace(juliaup_json_raw, file => "julia"))
+                end
             end
         end
     end
