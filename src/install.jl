@@ -158,6 +158,8 @@ function main()
                     isfile(file) ? TOML.parsefile(file) : Dict{String,Any}()
                 end
                 juliaup_toml = get(Dict{String,Any}, package_bundler_toml, "juliaup")
+                pkg_toml = get(Dict{String,Any}, package_bundler_toml, "Pkg")
+                pin = get(pkg_toml, "pin", false)
                 custom_juliaup_channel = !isempty(juliaup_toml)
                 extra_args = get(juliaup_toml, "args", String[])
                 manifest_toml = TOML.parsefile(joinpath(path, "Manifest.toml"))
@@ -171,6 +173,7 @@ function main()
                         julia_version,
                         extra_args,
                         custom_juliaup_channel,
+                        pin,
                     ),
                 )
             else
@@ -189,7 +192,8 @@ function main()
             channel = "+$(julia_version)"
             environment = "@$(each.environment)"
             try
-                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve(); Pkg.precompile();"
+                pinned = each.pin ? "Pkg.pin(; all_pkgs = true)" : "nothing"
+                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve(); $pinned; Pkg.precompile();"
                 run(`julia $(channel) --startup-file=no --project=$(environment) -e $code`)
             catch error
                 @error "Failed to resolve and precompile environment" julia_version environment error
