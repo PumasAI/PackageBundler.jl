@@ -503,8 +503,13 @@ function _package_version_locking!(environment)
         deps = only(deps)
         version = VersionNumber(get(deps, "version", manifest_toml["julia_version"]))
 
-        # Build numbers have to be stripped otherwise the resolver complains.
-        compat[name] = "= $(version.major).$(version.minor).$(version.patch)"
+        # Build numbers have to be stripped otherwise the resolver complains so
+        # only include the x.y.z for the `=` compat.
+        eq_version = "= $(version.major).$(version.minor).$(version.patch)"
+        # If there isn't a version number then it means it is an unversioned
+        # stdlib and so we need to add the `< 0.0.1,` part to avoid resolver
+        # failures.
+        compat[name] = haskey(deps, "version") ? eq_version : "< 0.0.1, $eq_version"
 
         if !haskey(project_toml["deps"], name)
             extras[name] = deps["uuid"]

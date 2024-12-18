@@ -69,12 +69,15 @@ function main()
     for environment in readdir(environments; join = true)
         env_name = basename(environment)
         if isdir(environment)
-            for file in readdir(environment; join = true)
-                file_name = basename(file)
-                content = read(file, String)
-                destination = joinpath(depot, "environments", env_name, file_name)
-                mkpath(dirname(destination))
-                write(destination, content)
+            for (root, _, files) in walkdir(environment)
+                for file in files
+                    src = joinpath(root, file)
+                    content = read(src, String)
+                    relfile = relpath(src, environment)
+                    dst = joinpath(depot, "environments", env_name, relfile)
+                    mkpath(dirname(dst))
+                    write(dst, content)
+                end
             end
         end
     end
@@ -149,7 +152,7 @@ function main()
     end
 
     if has_juliaup
-        @info "Resolving and precompiling all environments."
+        @info "Resolving all environments."
         environment_worklist = []
         for environment in readdir(environments)
             path = joinpath(depot, "environments", environment)
@@ -192,11 +195,96 @@ function main()
             channel = "+$(julia_version)"
             environment = "@$(each.environment)"
             try
-                pinned = each.pin ? "Pkg.pin(; all_pkgs = true)" : "nothing"
-                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve(); $pinned; Pkg.precompile();"
+                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve()"
+                run(
+                    addenv(
+                        `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
+                        # This stage should only resolve deps, not precompile
+                        # them, since after this we may point some deps to
+                        # vendored versions, which will trigger further
+                        # compilation anyway.
+                        "JULIA_PKG_PRECOMPILE_AUTO" => false,
+                    ),
+                )
+            catch error
+                @error "Failed to resolve environment" julia_version environment error
+                continue
+            end
+
+            # When there are packages contained in `<environment>/vendored`
+            # then we update the environment's manifest file to point to those
+            # packages when they match any dependencies.
+            let vendored_dir = joinpath(each.path, "vendored")
+                if isdir(vendored_dir)
+                    @info "Adding vendored dependencies."
+                    manifest_file = joinpath(each.path, "Manifest.toml")
+                    manifest_toml = TOML.parsefile(manifest_file)
+
+                    for vendored_package in readdir(vendored_dir; join = true)
+                        project_file = joinpath(vendored_package, "Project.toml")
+                        if isfile(project_file)
+                            project_toml = TOML.parsefile(project_file)
+                            deps = manifest_toml["deps"]
+                            package_name = project_toml["name"]
+                            if haskey(deps, package_name)
+                                for entry in deps[package_name]
+                                    vendored_package_version =
+                                        get(project_toml, "version", nothing)
+                                    manifest_package_version =
+                                        get(entry, "version", nothing)
+                                    if vendored_package_version == manifest_package_version
+                                        delete!(entry, "git-tree-sha1")
+                                        entry["path"] = relpath(vendored_package, each.path)
+                                    else
+                                        @error(
+                                            "version mismatch between vendored package version and environment",
+                                            package_name,
+                                            vendored_package_version,
+                                            manifest_package_version,
+                                        )
+                                    end
+                                end
+                            else
+                                @warn(
+                                    "vendored package not found in environment",
+                                    package = package_name,
+                                    environment = each.environment
+                                )
+                            end
+                        end
+                    end
+
+                    open(manifest_file, "w") do io
+                        TOML.print(io, manifest_toml; sorted = true)
+                    end
+                end
+            end
+
+            if each.pin
+                try
+                    code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.pin(; all_pkgs = true)"
+                    run(
+                        addenv(
+                            `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
+                            # This stage should only resolve deps, not precompile
+                            # them, since after this we may point some deps to
+                            # vendored versions, which will trigger further
+                            # compilation anyway.
+                            "JULIA_PKG_PRECOMPILE_AUTO" => false,
+                        ),
+                    )
+                catch error
+                    @error "Failed to resolve environment" julia_version environment error
+                    continue
+                end
+            end
+
+            @info "Precompiling all environments."
+            try
+                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.precompile()"
                 run(`julia $(channel) --startup-file=no --project=$(environment) -e $code`)
             catch error
-                @error "Failed to resolve and precompile environment" julia_version environment error
+                @error "Failed to precompile environment" julia_version environment error
                 continue
             end
 
