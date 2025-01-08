@@ -245,10 +245,6 @@ function bundle(
                     force = true,
                     download_info = Tuple[("$artifacts_url/$artifact_name", download_hash)],
                 )
-                if clean && isdir(dirname(output))
-                    @warn "Cleaning directory." dirname(output)
-                    rm(dirname(output); recursive = true)
-                end
                 isdir(dirname(output)) || mkpath(dirname(output))
                 cp(artifact_toml, output; force = true)
                 cp(temp_artifact, joinpath(dirname(output), artifact_name); force = true)
