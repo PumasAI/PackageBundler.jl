@@ -17,6 +17,26 @@ function main()
     has_juliaup = !isnothing(Sys.which("juliaup"))
     has_juliaup || @warn "`juliaup` is not installed. Some functionality may be limited."
 
+    # User configuration for installation. It is a TOML-formatted string passed
+    # in to the process via an environment variable. This allows the choice of
+    # environments that will be installed to be customized.
+    #
+    # Current keys that can be provided in this config are:
+    #
+    #   - `environments`: A list of environment names that should be installed.
+    #     When this key is not present, all environments will be installed.
+    #   - `precompile`: Should the environments be precompiled automatically?
+    user_config_toml = get(ENV, "PACKAGE_BUNDLER_CONFIG", "")
+    user_config = TOML.parse(user_config_toml)
+
+    user_environments = get(user_config, "environments", nothing)
+    # Installation happens either when no `environments` key is present in the
+    # user configuration, or when the environment is listed in the
+    # `environments`.
+    should_install(env) = isnothing(user_environments) || env in user_environments
+
+    should_precompile = get(user_config, "precompile", true)
+
     environments = normpath(joinpath(@__DIR__, "..", "environments"))
     packages = normpath(joinpath(@__DIR__, "..", "packages"))
     registry = normpath(joinpath(@__DIR__, "..", "registry"))
@@ -47,7 +67,8 @@ function main()
         Pkg.Registry.add(Pkg.Registry.DEFAULT_REGISTRIES)
     end
 
-    new_environments = readdir(environments)
+    new_environments =
+        isnothing(user_environments) ? readdir(environments) : user_environments
     depot_environments = joinpath(depot, "environments")
     isdir(depot_environments) || mkpath(depot_environments)
     current_environments = readdir(depot_environments)
@@ -68,7 +89,7 @@ function main()
     @info "Installing environments" new_environments
     for environment in readdir(environments; join = true)
         env_name = basename(environment)
-        if isdir(environment)
+        if isdir(environment) && should_install(env_name)
             for (root, _, files) in walkdir(environment)
                 for file in files
                     src = joinpath(root, file)
@@ -157,28 +178,30 @@ function main()
         for environment in readdir(environments)
             path = joinpath(depot, "environments", environment)
             if isdir(path)
-                package_bundler_toml = let file = joinpath(path, "PackageBundler.toml")
-                    isfile(file) ? TOML.parsefile(file) : Dict{String,Any}()
+                if should_install(environment)
+                    package_bundler_toml = let file = joinpath(path, "PackageBundler.toml")
+                        isfile(file) ? TOML.parsefile(file) : Dict{String,Any}()
+                    end
+                    juliaup_toml = get(Dict{String,Any}, package_bundler_toml, "juliaup")
+                    pkg_toml = get(Dict{String,Any}, package_bundler_toml, "Pkg")
+                    pin = get(pkg_toml, "pin", false)
+                    custom_juliaup_channel = !isempty(juliaup_toml)
+                    extra_args = get(juliaup_toml, "args", String[])
+                    manifest_toml = TOML.parsefile(joinpath(path, "Manifest.toml"))
+                    manifest_julia_version = manifest_toml["julia_version"]
+                    julia_version = get(juliaup_toml, "channel", manifest_julia_version)
+                    push!(
+                        environment_worklist,
+                        (;
+                            path,
+                            environment,
+                            julia_version,
+                            extra_args,
+                            custom_juliaup_channel,
+                            pin,
+                        ),
+                    )
                 end
-                juliaup_toml = get(Dict{String,Any}, package_bundler_toml, "juliaup")
-                pkg_toml = get(Dict{String,Any}, package_bundler_toml, "Pkg")
-                pin = get(pkg_toml, "pin", false)
-                custom_juliaup_channel = !isempty(juliaup_toml)
-                extra_args = get(juliaup_toml, "args", String[])
-                manifest_toml = TOML.parsefile(joinpath(path, "Manifest.toml"))
-                manifest_julia_version = manifest_toml["julia_version"]
-                julia_version = get(juliaup_toml, "channel", manifest_julia_version)
-                push!(
-                    environment_worklist,
-                    (;
-                        path,
-                        environment,
-                        julia_version,
-                        extra_args,
-                        custom_juliaup_channel,
-                        pin,
-                    ),
-                )
             else
                 @warn "Environment not found" environment
             end
@@ -279,13 +302,17 @@ function main()
                 end
             end
 
-            @info "Precompiling all environments."
-            try
-                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.precompile()"
-                run(`julia $(channel) --startup-file=no --project=$(environment) -e $code`)
-            catch error
-                @error "Failed to precompile environment" julia_version environment error
-                continue
+            if should_precompile
+                @info "Precompiling all environments."
+                try
+                    code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.precompile()"
+                    run(
+                        `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
+                    )
+                catch error
+                    @error "Failed to precompile environment" julia_version environment error
+                    continue
+                end
             end
 
             if each.custom_juliaup_channel
