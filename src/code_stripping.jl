@@ -289,6 +289,15 @@ function _process_reg_info(reg)
             end
         end
     end
+
+    # Filter out folders that don't have a `Package.toml` file since those are
+    # not package folders.
+    for (k, v) in dict
+        if !haskey(v, "Package.toml")
+            delete!(dict, k)
+        end
+    end
+
     return dict
 end
 
