@@ -218,7 +218,7 @@ function main()
             channel = "+$(julia_version)"
             environment = "@$(each.environment)"
             try
-                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.resolve()"
+                code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; try; Pkg.instantiate(); catch; end; Pkg.resolve()"
                 run(
                     addenv(
                         `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
