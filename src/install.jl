@@ -327,7 +327,12 @@ function main()
                         run(cmd)
                     end
                     juliaup_json_raw = read(juliaup_json, String)
-                    write(juliaup_json, replace(juliaup_json_raw, file => "julia"))
+                    # `juliaup` will store the path with escaped `\`s in the json
+                    # configuration. To correctly replace them with the text "julia" on
+                    # Windows we need to match against the escaped version of the path.
+                    escaped_file =
+                        @static Sys.iswindows() ? replace(file, "\\" => "\\\\") : file
+                    write(juliaup_json, replace(juliaup_json_raw, escaped_file => "julia"))
                 end
             end
         end
