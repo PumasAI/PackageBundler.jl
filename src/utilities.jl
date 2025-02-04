@@ -119,4 +119,11 @@ function generate(
         PackageBundler.instantiate(joinpath(@__DIR__, "environments"))
         """,
     )
+    write(
+        joinpath(directory, ".gitignore"),
+        """
+        *.pem
+        *.pub
+        """,
+    )
 end
