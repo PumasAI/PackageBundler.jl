@@ -442,16 +442,16 @@ function _sniff_versions(environment::AbstractString)
             )
         end
     end
-    _check_required_deps(output)
+    _check_required_deps(output; environment)
     return output
 end
 
 # Dependencies that are required for functioning of the bundled code.
-function _check_required_deps(deps)
+function _check_required_deps(deps; environment)
     required_deps = Dict("Serialization" => "9e88b42a-f829-5b0c-bbe9-9e923198166b")
     for (name, uuid) in required_deps
         entry = get(Dict{String,String}, deps, uuid)
-        get(entry, "name", nothing) == name || error("`$name` dependency missing from env.")
+        get(entry, "name", nothing) == name || error("`$name` dependency missing from env: $(environment)")
     end
 end
 
