@@ -124,6 +124,7 @@ function generate(
         """
         *.pem
         *.pub
+        /build/
         """,
     )
 end
