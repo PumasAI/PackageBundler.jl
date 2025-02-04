@@ -113,7 +113,7 @@ function bundle(
 )
     config = abspath(config)
     endswith(config, ".toml") || error("Config file must be a TOML file: `$config`.")
-    isfile(config) || error("Config file not found: `$config`.")
+    isfile(config) || error("Config file not found: `$config`. Is your current working directory the correct directory?")
 
     dir = dirname(config)
 
