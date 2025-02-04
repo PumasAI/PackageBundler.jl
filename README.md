@@ -59,7 +59,14 @@ key = "signing-key"
 "<uuid>" = "<package name>"
 ```
 
-and then generate a bundle with
+Next, generate a new public/private keypair with:
+
+```julia
+import PackageBundler
+PackageBundler.keypair(pwd())
+```
+
+Then, generate a bundle with:
 
 ```julia
 import PackageBundler
