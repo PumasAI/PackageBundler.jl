@@ -237,7 +237,8 @@ function bundle(
                 end
                 artifact_name = "$name.tar.gz"
                 temp_artifact = joinpath(temp_dir, artifact_name)
-                download_hash = Pkg.Artifacts.archive_artifact(product_hash, temp_artifact)
+                download_hash =
+                    @time Pkg.Artifacts.archive_artifact(product_hash, temp_artifact)
                 Pkg.Artifacts.bind_artifact!(
                     artifact_toml,
                     name,
