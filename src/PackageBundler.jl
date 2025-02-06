@@ -237,7 +237,7 @@ function bundle(
                 end
                 artifact_name = "$name.tar.gz"
                 temp_artifact = joinpath(temp_dir, artifact_name)
-                download_hash = Pkg.Artifacts.archive_artifact(product_hash, temp_artifact)
+                download_hash = _archive_artifact(product_hash, temp_artifact)
                 Pkg.Artifacts.bind_artifact!(
                     artifact_toml,
                     name,
@@ -252,6 +252,39 @@ function bundle(
                 error("Invalid output target: $output")
             end
         end
+    end
+end
+
+function _archive_artifact(
+    hash::Base.SHA1,
+    tarball_path::String;
+    honor_overrides::Bool = false,
+)
+    if !honor_overrides
+        if Pkg.Artifacts.query_override(hash) !== nothing
+            error(
+                "Will not archive an overridden artifact unless `honor_overrides` is set!",
+            )
+        end
+    end
+
+    if !Pkg.Artifacts.artifact_exists(hash)
+        error("Unable to archive artifact $(bytes2hex(hash.bytes)): does not exist!")
+    end
+
+    # Package it up
+    local tar
+    try
+        tar_gz = open(tarball_path, write = true)
+        tar = CodecZlib.GzipCompressorStream(tar_gz)
+        Tar.create(Pkg.Artifacts.artifact_path(hash), tar)
+    finally
+        close(tar)
+    end
+
+    # Calculate its sha256 and return that
+    return open(tarball_path, "r") do io
+        return bytes2hex(Pkg.Artifacts.sha256(io))
     end
 end
 
