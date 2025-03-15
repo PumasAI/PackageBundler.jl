@@ -349,7 +349,7 @@ function _process_project_env(;
     _sign_file(joinpath(named_environment, "Manifest.toml"), key_pair.private)
     write(joinpath(named_environment, basename(key_pair.public)), read(key_pair.public))
 
-    package_paths = _sniff_versions(project_dir)
+    package_paths = _sniff_versions(project_dir, multiplexers)
 
     pkg_version_info = Dict()
     for (each_uuid, each_name) in stripped
@@ -387,20 +387,21 @@ end
 #     "julia_version" => v"<version>"
 # ))
 #
-function _sniff_versions(environment::AbstractString)
+function _sniff_versions(environment::AbstractString, multiplexers)
     registries = Dict(
         reg.uuid => _process_reg_info_uuid_mapping(reg) for
         reg in Pkg.Registry.reachable_registries()
     )
     project = Base.env_project_file(environment)
     env = Pkg.Types.EnvCache(project)
+    stdlib_path = _get_stdlib_path(env, environment, multiplexers)
     output = Dict{String,Dict{String,Any}}()
     for (uuid, entry) in env.manifest.deps
         name = "$(entry.name)"
         path = nothing
         if entry.tree_hash === nothing
             # It's a stdlib, search for it there:
-            candidate = joinpath(Pkg.stdlib_dir(), name)
+            candidate = joinpath(stdlib_path, name)
             if isdir(candidate)
                 path = candidate
             else
@@ -446,12 +447,26 @@ function _sniff_versions(environment::AbstractString)
     return output
 end
 
+function _get_stdlib_path(env, environment, multiplexers)
+    toml_file = joinpath(environment, "PackageBundler.toml")
+    toml = isfile(toml_file) ? TOML.parsefile(toml_file) : Dict()
+    juliaup = get(Dict, toml, "juliaup")
+    channel = get(juliaup, "channel", nothing)
+    version = something(channel, env.manifest.julia_version)
+    julia_bin = _process_multiplexers(multiplexers, version)
+    return read(
+        `$julia_bin --startup-file=no -e 'import Pkg; print(Pkg.stdlib_dir())'`,
+        String,
+    )
+end
+
 # Dependencies that are required for functioning of the bundled code.
 function _check_required_deps(deps; environment)
     required_deps = Dict("Serialization" => "9e88b42a-f829-5b0c-bbe9-9e923198166b")
     for (name, uuid) in required_deps
         entry = get(Dict{String,String}, deps, uuid)
-        get(entry, "name", nothing) == name || error("`$name` dependency missing from env: $(environment)")
+        get(entry, "name", nothing) == name ||
+            error("`$name` dependency missing from env: $(environment)")
     end
 end
 
@@ -718,7 +733,10 @@ function _stripped_source_path(
     return joinpath("[bundled]", package_name, version, relpath(source_file, project_root))
 end
 
-function _process_multiplexers(multiplexers::Vector{String}, julia_version::VersionNumber)
+function _process_multiplexers(
+    multiplexers::Vector{String},
+    julia_version::Union{String,VersionNumber},
+)
     for multiplexer in multiplexers
         exists = Sys.which(multiplexer)
         if !isnothing(exists)
