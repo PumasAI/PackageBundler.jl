@@ -21,6 +21,19 @@ function instantiate(environments::String)
             @info "Instantiating $each"
             toml = TOML.parsefile(manifest)
             julia_version = toml["julia_version"]
+
+            # Check for a per-environment `PackageBundler.toml` file and use
+            # that Juliaup channel if it exists.
+            packagebundler_file = joinpath(each, "PackageBundler.toml")
+            packagebundler_toml =
+                isfile(packagebundler_file) ? TOML.parsefile(packagebundler_file) :
+                Dict{String,Any}()
+            julia_version = get(
+                get(Dict{String,Any}, packagebundler_toml, "juliaup"),
+                "channel",
+                julia_version,
+            )
+
             if !isnothing(Sys.which("juliaup"))
                 @info "Checking whether Julia '$julia_version' is installed, if not, installing it."
                 run(`juliaup add $julia_version`)
