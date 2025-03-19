@@ -351,6 +351,14 @@ function _process_project_env(;
 
     package_paths = _sniff_versions(project_dir, multiplexers)
 
+    packagebundler_file = joinpath(project_dir, "PackageBundler.toml")
+    packagebundler_toml =
+        isfile(packagebundler_file) ? TOML.parsefile(packagebundler_file) :
+        Dict{String,Any}()
+    julia_version = TOML.parsefile(manifest_toml)["julia_version"]
+    julia_version =
+        get(get(Dict{String,Any}, packagebundler_toml, "juliaup"), "channel", julia_version)
+
     pkg_version_info = Dict()
     for (each_uuid, each_name) in stripped
         if haskey(package_paths, each_uuid)
@@ -361,7 +369,7 @@ function _process_project_env(;
             if isempty(registries) || haskey(registries, registry)
                 version_info = _strip_package(
                     package_paths[each_uuid]["path"],
-                    package_paths[each_uuid]["julia_version"],
+                    julia_version,
                     output_dir,
                     key_pair,
                     handlers,
@@ -562,7 +570,7 @@ end
 
 function _strip_package(
     package::AbstractString,
-    julia_version::VersionNumber,
+    julia_version::Union{String,VersionNumber},
     output::AbstractString,
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
