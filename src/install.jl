@@ -17,6 +17,9 @@ function main()
     has_juliaup = !isnothing(Sys.which("juliaup"))
     has_juliaup || @warn "`juliaup` is not installed. Some functionality may be limited."
 
+    julia_cpu_target = get(ENV, "JULIA_CPU_TARGET", nothing)
+    cpu_target = isnothing(julia_cpu_target) ? String[] : ["--cpu-target=$(julia_cpu_target)"]
+
     # User configuration for installation. It is a TOML-formatted string passed
     # in to the process via an environment variable. This allows the choice of
     # environments that will be installed to be customized.
@@ -57,7 +60,7 @@ function main()
     current_registry_remover = joinpath(current_registry, "remove.jl")
     if isfile(current_registry_remover)
         @info "Removing existing registry" current_registry
-        run(`$(Base.julia_cmd()) --startup-file=no $current_registry_remover`)
+        run(`$(Base.julia_cmd()) $cpu_target --startup-file=no $current_registry_remover`)
     end
 
     # Non-standard depot locations may not have the default registries. So
@@ -221,7 +224,7 @@ function main()
                 code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; try; Pkg.instantiate(); catch; end; Pkg.resolve()"
                 run(
                     addenv(
-                        `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
+                        `julia $(channel) $cpu_target --startup-file=no --project=$(environment) -e $code`,
                         # This stage should only resolve deps, not precompile
                         # them, since after this we may point some deps to
                         # vendored versions, which will trigger further
@@ -288,7 +291,7 @@ function main()
                     code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.pin(; all_pkgs = true)"
                     run(
                         addenv(
-                            `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
+                            `julia $(channel) $cpu_target --startup-file=no --project=$(environment) -e $code`,
                             # This stage should only resolve deps, not precompile
                             # them, since after this we may point some deps to
                             # vendored versions, which will trigger further
@@ -307,7 +310,7 @@ function main()
                 try
                     code = "push!(LOAD_PATH, \"@stdlib\"); import Pkg; Pkg.precompile()"
                     run(
-                        `julia $(channel) --startup-file=no --project=$(environment) -e $code`,
+                        `julia $(channel) $cpu_target --startup-file=no --project=$(environment) -e $code`,
                     )
                 catch error
                     @error "Failed to precompile environment" julia_version environment error
