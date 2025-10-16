@@ -36,7 +36,9 @@ function instantiate(environments::String)
 
             if !isnothing(Sys.which("juliaup"))
                 @info "Checking whether Julia '$julia_version' is installed, if not, installing it."
-                run(`juliaup add $julia_version`)
+                if !any(channel -> channel == julia_version, collect(first(split(l[9:end])) for l in readlines(`juliaup status`)[3:end]))
+                    run(`juliaup add $julia_version`)
+                end
                 withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
                     run(
                         `julia +$(julia_version) --project=$each -e 'import Pkg; Pkg.instantiate()'`,

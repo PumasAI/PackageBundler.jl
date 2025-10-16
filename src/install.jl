@@ -209,7 +209,9 @@ function main()
         for each in environment_worklist
             julia_version = each.julia_version
             try
-                run(`juliaup add $(julia_version)`)
+                if !any(channel -> channel == julia_version, collect(first(split(l[9:end])) for l in readlines(`juliaup status`)[3:end]))
+                    run(`juliaup add $(julia_version)`)
+                end
             catch error
                 @error "Failed to add Julia version via `juliaup`" julia_version error
                 continue
