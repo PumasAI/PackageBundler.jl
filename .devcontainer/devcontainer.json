@@ -1,0 +1,9 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "ghcr.io/julialang/devcontainer-features/julia:1": {
+      "channel": "lts"
+    }
+  },
+  "postCreateCommand": ".devcontainer/postCreate.sh"
+}
