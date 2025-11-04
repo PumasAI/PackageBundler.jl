@@ -7,7 +7,7 @@ version as specified in the `Manifest.toml` file. This uses either `juliaup` or
 `asdf` to switch between `julia` versions as needed. Make sure to have either of
 those installed, as well as the expected `julia` versions.
 """
-function instantiate(environments::String)
+function instantiate(environments::String; arch::Union{Symbol,Nothing} = nothing)
     if ispath(environments)
         if isfile(environments)
             error("The path '$environments' is a file, not a directory.")
@@ -35,11 +35,12 @@ function instantiate(environments::String)
             )
 
             if !isnothing(Sys.which("juliaup"))
-                @info "Checking whether Julia '$julia_version' is installed, if not, installing it."
-                run(`juliaup add $julia_version`)
+                juliaup_channel = _juliaup_channel(julia_version, arch)
+                @info "Checking whether Julia '$juliaup_channel' is installed, if not, installing it."
+                run(`juliaup add $juliaup_channel`)
                 withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
                     run(
-                        `julia +$(julia_version) --project=$each -e 'import Pkg; Pkg.instantiate()'`,
+                        `julia +$juliaup_channel --project=$each -e 'import Pkg; Pkg.instantiate()'`,
                     )
                 end
             elseif !isnothing(Sys.which("asdf"))
