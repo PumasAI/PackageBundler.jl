@@ -594,7 +594,7 @@ function _strip_package(
     multiplexers::Vector{String},
     arch::Union{Symbol,Nothing} = nothing,
 )
-    @info "Stripping source code." Sys.ARCH arch julia_version package
+    @info "Stripping source code." arch julia_version package
 
     package = abspath(package)
     output = abspath(output)
