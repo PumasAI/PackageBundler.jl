@@ -4,10 +4,6 @@ import Example
 
 greet() = print(Example.hello("0.2.0!"))
 
-struct IntType
-    i::Int
-end
-
-const INT_VALUE = IntType(42)
+42 # This "code" will not serialize on a 64-bit platform, and deserialize on a 32-bit platform
 
 end # module TestPackage
