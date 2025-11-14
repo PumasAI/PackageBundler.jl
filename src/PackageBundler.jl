@@ -103,6 +103,11 @@ listed below. The valid names for handlers are:
     is serialized. Takes `filename`, `expr`, and `context` as arguments.
   - `code_injector.jl`: A function that injects extra code into the bundled
     packages. Takes `filename` and `context` as arguments.
+  - `data_decoder.jl`: A function that generates the `Expr` of a `Function`
+    used to decode the serialized code. Takes `filename`, `xorshift`, and
+    `context` as arguments.
+  - `data_encoder.jl`: A function that encodes the serialized code. Takes
+    `filename`, `data`, and `context` as arguments.  
   - `post_process.jl`: A function that is called after the code is stripped from
     all files. Takes the `context` as it's argument.
 """
@@ -184,7 +189,7 @@ function bundle(
         file = normpath(joinpath(dir, file))
         isfile(file) || error("Handler file not found: $file")
         key = basename(first(splitext(file)))
-        if key in ("code_loader", "code_transformer", "code_injector", "post_process")
+        if key in ("code_loader", "code_transformer", "code_injector", "data_decoder", "data_encoder", "post_process")
             handlers[key] = file
         else
             error("Invalid handler key: $key")
