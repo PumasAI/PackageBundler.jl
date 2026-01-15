@@ -1,5 +1,15 @@
 # Implementation.
 
+struct PackageWorkItem
+    package_path::String
+    temp_dir::String
+    julia_files::Vector{Dict{String,Any}}
+    package_name::String
+    version::String
+    project_toml::Dict{String,Any}
+    output_dir::String
+end
+
 function _generate_stripped_bundle(;
     root_dir::AbstractString,
     project_dirs::Union{AbstractString,Vector{String}},
@@ -14,25 +24,35 @@ function _generate_stripped_bundle(;
 )
     output_dir = abspath(output_dir)
 
-    # Strip all the packages listed in `stripped` from all the environments
-    # listed in `project_dirs`. Save each stripped package in a separate
-    # versioned folder in the `packages` folder.
-    pkg_version_info = Dict()
+    # Phase 1: Collect work items grouped by Julia version.
+    work_by_version = Dict{String,Vector{PackageWorkItem}}()
     project_dirs = vcat(project_dirs)
     for project_dir in project_dirs
         project_dir = abspath(project_dir)
 
-        new_pkg_version_info = _process_project_env(;
+        julia_version, items = _process_project_env(;
             root_dir = root_dir,
             project_dir = project_dir,
             output_dir = output_dir,
             stripped = stripped,
             registries = registries,
             key_pair = key_pair,
-            handlers = handlers,
             multiplexers = multiplexers,
         )
 
+        append!(get!(Vector{PackageWorkItem}, work_by_version, julia_version), items)
+    end
+
+    # Phase 2: Execute batch serialization per Julia version.
+    pkg_version_info = Dict{String,Any}()
+    for (julia_version, items) in work_by_version
+        new_pkg_version_info = _execute_batch_serialization(
+            julia_version,
+            items,
+            key_pair,
+            handlers,
+            multiplexers,
+        )
         for (k, v) in new_pkg_version_info
             current_pkg_version_info = get!(Dict{String,Any}, pkg_version_info, k)
             pkg_version_info[k] = merge(current_pkg_version_info, v)
@@ -318,7 +338,6 @@ function _process_project_env(;
     stripped::Dict{String,String},
     registries::Dict{String,String},
     key_pair::@NamedTuple{private::String, public::String},
-    handlers::Dict,
     multiplexers::Vector{String},
 )
     project_dir = normpath(project_dir)
@@ -359,7 +378,7 @@ function _process_project_env(;
     julia_version =
         get(get(Dict{String,Any}, packagebundler_toml, "juliaup"), "channel", julia_version)
 
-    pkg_version_info = Dict()
+    work_items = PackageWorkItem[]
     for (each_uuid, each_name) in stripped
         if haskey(package_paths, each_uuid)
             if package_paths[each_uuid]["name"] != each_name
@@ -367,21 +386,17 @@ function _process_project_env(;
             end
             registry = package_paths[each_uuid]["registry"]
             if isempty(registries) || haskey(registries, registry)
-                version_info = _strip_package(
+                item = _prepare_package_for_stripping(
                     package_paths[each_uuid]["path"],
-                    julia_version,
                     output_dir,
                     key_pair,
-                    handlers,
-                    multiplexers,
                 )
-                versions = get!(Dict{String,Any}, pkg_version_info, each_name)
-                versions[version_info["project"]["version"]] = version_info
+                push!(work_items, item)
             end
         end
     end
 
-    return pkg_version_info
+    return julia_version, work_items
 end
 
 # Environment package version sniffer. Returns data of the form:
@@ -568,166 +583,169 @@ end
 
 # Entire package source code stripping.
 
-function _strip_package(
+function _prepare_package_for_stripping(
     package::AbstractString,
-    julia_version::Union{String,VersionNumber},
     output::AbstractString,
+    key_pair::@NamedTuple{private::String, public::String},
+)
+    package = abspath(package)
+    output = abspath(output)
+
+    # Create temp directory that persists until batch execution completes.
+    temp = mktempdir(; cleanup = false)
+
+    # Remove the readonly permissions from the package so that we can copy
+    # it and strip code from it.
+    for (root, _, files) in walkdir(package)
+        for file in files
+            content = read(joinpath(root, file))
+            path = joinpath(replace(root, package => temp), file)
+            mkpath(dirname(path))
+            write(path, content)
+        end
+    end
+
+    # Remove the `.git` folder, since we are generating a new git repo
+    # instead and we do not want to include the git history of the package.
+    git_path = joinpath(temp, ".git")
+    isdir(git_path) && rm(git_path; recursive = true)
+
+    # Sign Project.toml and copy public key.
+    project = joinpath(temp, "Project.toml")
+    isfile(project) || error("Project file not found: $project")
+    toml = TOML.parsefile(project)
+    open(project, "w") do io
+        TOML.print(io, toml; sorted = true)
+    end
+    _sign_file(project, key_pair.private)
+    write(joinpath(temp, basename(key_pair.public)), read(key_pair.public))
+
+    version = toml["version"]
+    package_name = toml["name"]
+    entry_point = joinpath(temp, "src", "$package_name.jl")
+
+    # Capture all the files that we want to serialize.
+    julia_files = Dict{String,Any}[]
+    function _add_to_code_stripping_list!(filename; entry_point = nothing)
+        push!(
+            julia_files,
+            Dict("filename" => filename, "entry_point" => something(entry_point, "")),
+        )
+    end
+
+    _add_to_code_stripping_list!(entry_point; entry_point = package_name)
+
+    # Collect all other files in src/.
+    src = joinpath(temp, "src")
+    for (root, _, files) in walkdir(src)
+        for file in files
+            path = joinpath(root, file)
+            if endswith(file, ".jl") && path != entry_point
+                _add_to_code_stripping_list!(path)
+            end
+        end
+    end
+
+    # Strip extension code as well.
+    ext = joinpath(temp, "ext")
+    if isdir(ext)
+        extensions = get(Dict{String,Any}, toml, "extensions")
+        maybe_entry_point = Dict{String,String}()
+        for ext_name in keys(extensions)
+            maybe_entry_point[joinpath(ext, "$ext_name.jl")] = ext_name
+            maybe_entry_point[joinpath(ext, "$ext_name", "$ext_name.jl")] = ext_name
+        end
+        for (root, _, files) in walkdir(ext)
+            for file in files
+                path = joinpath(root, file)
+                if endswith(file, ".jl")
+                    entry_point = get(maybe_entry_point, path, nothing)
+                    _add_to_code_stripping_list!(path; entry_point)
+                end
+            end
+        end
+    end
+
+    return PackageWorkItem(package, temp, julia_files, package_name, version, toml, output)
+end
+
+function _execute_batch_serialization(
+    julia_version::Union{String,VersionNumber},
+    items::Vector{PackageWorkItem},
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
     multiplexers::Vector{String},
 )
-    @info "Stripping source code." julia_version package
+    @info "Stripping source code." julia_version n_packages = length(items)
 
-    package = abspath(package)
-    output = abspath(output)
+    # Build batch payload with all packages for this Julia version.
+    packages_payload = [
+        Dict(
+            "package_name" => item.package_name,
+            "package_version" => item.version,
+            "temp_directory" => item.temp_dir,
+            "julia_files" => item.julia_files,
+        ) for item in items
+    ]
 
-    # Prepare the content that we actually want to copy over to the stripped
-    # package. Strip out other stuff. (We don't want to copy over any `.git`
-    # folders, since history needs to be stripped.)
-    mktempdir() do temp
-        # Remove the readonly permissions from the package so that we can copy
-        # it and strip code from it.
-        for (root, _, files) in walkdir(package)
-            for file in files
-                content = read(joinpath(root, file))
-                path = joinpath(replace(root, package => temp), file)
-                mkpath(dirname(path))
-                write(path, content)
+    payload = Dict(
+        "private_key" => key_pair.private,
+        "public_key" => key_pair.public,
+        "handlers" => handlers,
+        "packages" => packages_payload,
+    )
+
+    try
+        mktempdir() do toml_temp
+            toml_file = joinpath(toml_temp, "payload.toml")
+            open(toml_file, "w") do io
+                TOML.print(io, payload)
             end
+            script = joinpath(@__DIR__, "serializer.jl")
+            binary = _process_multiplexers(multiplexers, julia_version)
+            run(`$(binary) --startup-file=no $(script) $(toml_file)`)
         end
 
-        # Remove the `.git` folder, since we are generating a new git repo
-        # instead and we do not want to include the git history of the package.
-        git_path = joinpath(temp, ".git")
-        isdir(git_path) && rm(git_path; recursive = true)
-
-        # Generate the "entry-point" file for the package. This is the file that
-        # will be loaded when the package is loaded. It will load the serialized
-        # code and evaluate it at precompilation time.
-        project = joinpath(temp, "Project.toml")
-        isfile(project) || error("Project file not found: $project")
-        toml = TOML.parsefile(project)
-        open(project, "w") do io
-            TOML.print(io, toml; sorted = true)
-        end
-        _sign_file(project, key_pair.private)
-        write(joinpath(temp, basename(key_pair.public)), read(key_pair.public))
-
-        version = toml["version"]
-
-        package_name = toml["name"]
-        entry_point = joinpath(temp, "src", "$package_name.jl")
-
-        # Capture all the files that we want to serialize, afterwhich we then
-        # launch a `julia` with the required version to perform the
-        # serialization in a single batch, rather than launching a new process
-        # for each file.
-        julia_files = []
-        function _add_to_code_stripping_list!(filename; entry_point = nothing)
-            push!(
-                julia_files,
-                Dict("filename" => filename, "entry_point" => something(entry_point, "")),
-            )
-        end
-
-        _add_to_code_stripping_list!(entry_point; entry_point = package_name)
-
-        # Now we need to strip the code from all the other files in the package.
-        src = joinpath(temp, "src")
-        for (root, _, files) in walkdir(src)
-            for file in files
-                path = joinpath(root, file)
-                # We skip the entry-point file since we already stripped it and
-                # it's behaviour is slightly different that all the others since
-                # we don't need the wrapper module syntax around the rest of the
-                # files.
-                if endswith(file, ".jl") && path != entry_point
-                    _add_to_code_stripping_list!(path)
-                end
-            end
-        end
-
-        # Strip extension code as well.
-        ext = joinpath(temp, "ext")
-        if isdir(ext)
-            extensions = get(Dict{String,Any}, toml, "extensions")
-            # Entry points for extensions are expected to be in the `ext` as
-            # either `ext_name.jl` or `ext_name/ext_name.jl`. We build a lookup
-            # for all the possible paths prior to stripping the code.
-            maybe_entry_point = Dict{String,String}()
-            for ext_name in keys(extensions)
-                maybe_entry_point[joinpath(ext, "$ext_name.jl")] = ext_name
-                maybe_entry_point[joinpath(ext, "$ext_name", "$ext_name.jl")] = ext_name
-            end
-            # Now we strip all the Julia files, and handle the entry point files
-            # in the same way as we did for the package's entry point.
-            for (root, _, files) in walkdir(ext)
+        # Sign and copy all packages to output.
+        pkg_version_info = Dict{String,Any}()
+        for item in items
+            # Sign all files created during serialization.
+            for (root, _, files) in walkdir(item.temp_dir)
                 for file in files
-                    path = joinpath(root, file)
-                    if endswith(file, ".jl")
-                        entry_point = get(maybe_entry_point, path, nothing)
-                        _add_to_code_stripping_list!(path; entry_point)
+                    if endswith(file, ".jl") || endswith(file, ".jls")
+                        _sign_file(joinpath(root, file), key_pair.private)
                     end
                 end
             end
-        end
 
-        # Perform the parsing and serialization in a separate process, since we
-        # want the serialized `Expr`s to be deserializable by the right `julia`
-        # version. Any manifests that happen to require the exact same version
-        # of a stripped package and have different `julia_version`s need their
-        # own serialized versions of the source.
-        mktempdir() do toml_temp
-            toml_file = joinpath(toml_temp, "payload.toml")
-            try
-                open(toml_file, "w") do io
-                    TOML.print(
-                        io,
-                        Dict(
-                            "package_name" => package_name,
-                            "package_version" => version,
-                            "private_key" => key_pair.private,
-                            "public_key" => key_pair.public,
-                            "julia_files" => julia_files,
-                            "temp_directory" => temp,
-                            "handlers" => handlers,
-                        ),
-                    )
-                end
-                script = joinpath(@__DIR__, "serializer.jl")
-                binary = _process_multiplexers(multiplexers, julia_version)
-                run(`$(binary) --startup-file=no $(script) $(toml_file)`)
-            finally
-                rm(toml_file; force = true)
-            end
-        end
+            # Copy to output directory.
+            package_dir = joinpath(item.output_dir, "packages", item.package_name, item.version)
+            isdir(package_dir) || mkpath(package_dir)
 
-        # Sign all the files that have been created/modified during serialization.
-        for (root, _, files) in walkdir(temp)
-            for file in files
-                if endswith(file, ".jl") || endswith(file, ".jls")
-                    _sign_file(joinpath(root, file), key_pair.private)
+            for (root, _, files) in walkdir(item.temp_dir)
+                for file in files
+                    src_file = joinpath(root, file)
+                    dst_file = joinpath(package_dir, relpath(root, item.temp_dir), file)
+                    if isfile(dst_file) && read(src_file) != read(dst_file)
+                        error("identical file paths, mismatched content: $src_file $dst_file")
+                    end
+                    dst_dir = dirname(dst_file)
+                    isdir(dst_dir) || mkpath(dst_dir)
+                    write(dst_file, read(src_file))
                 end
             end
+
+            # Build result info.
+            versions = get!(Dict{String,Any}, pkg_version_info, item.package_name)
+            versions[item.version] = Dict("path" => package_dir, "project" => item.project_toml)
         end
 
-        package_dir = joinpath(output, "packages", package_name, version)
-        isdir(package_dir) || mkpath(package_dir)
-
-        for (root, _, files) in walkdir(temp)
-            for file in files
-                src_file = joinpath(root, file)
-                dst_file = joinpath(package_dir, relpath(root, temp), file)
-                if isfile(dst_file) && read(src_file) != read(dst_file)
-                    error("identical file paths, mismatched content: $src_file $dst_file")
-                end
-                dst_dir = dirname(dst_file)
-                isdir(dst_dir) || mkpath(dst_dir)
-                write(dst_file, read(src_file))
-            end
+        return pkg_version_info
+    finally
+        # Clean up temp directories.
+        for item in items
+            rm(item.temp_dir; recursive = true, force = true)
         end
-
-        return Dict("path" => package_dir, "project" => toml)
     end
 end
 
