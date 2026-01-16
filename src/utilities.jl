@@ -15,73 +15,75 @@ function instantiate(environments::String; arch::Union{Symbol,Nothing} = nothing
     else
         error("The path '$environments' does not exist.")
     end
-    for each in readdir(environments; join = true)
+    for (path, _, files) in walkdir(environments)
+        if !("Manifest.toml" in files)
+            continue
+        end
+        each = joinpath(environments, path)
         manifest = joinpath(each, "Manifest.toml")
-        if isfile(manifest)
-            @info "Instantiating $each"
-            toml = TOML.parsefile(manifest)
-            julia_version = toml["julia_version"]
+        @info "Instantiating $each"
+        toml = TOML.parsefile(manifest)
+        julia_version = toml["julia_version"]
 
-            # Check for a per-environment `PackageBundler.toml` file and use
-            # that Juliaup channel if it exists.
-            packagebundler_file = joinpath(each, "PackageBundler.toml")
-            packagebundler_toml =
-                isfile(packagebundler_file) ? TOML.parsefile(packagebundler_file) :
-                Dict{String,Any}()
-            julia_version = get(
-                get(Dict{String,Any}, packagebundler_toml, "juliaup"),
-                "channel",
-                julia_version,
-            )
+        # Check for a per-environment `PackageBundler.toml` file and use
+        # that Juliaup channel if it exists.
+        packagebundler_file = joinpath(each, "PackageBundler.toml")
+        packagebundler_toml =
+            isfile(packagebundler_file) ? TOML.parsefile(packagebundler_file) :
+            Dict{String,Any}()
+        julia_version = get(
+            get(Dict{String,Any}, packagebundler_toml, "juliaup"),
+            "channel",
+            julia_version,
+        )
 
-            if !isnothing(Sys.which("juliaup"))
-                juliaup_channel = _juliaup_channel(julia_version, arch)
-                @info "Checking whether Julia '$juliaup_channel' is installed, if not, installing it."
-                run(`juliaup add $juliaup_channel`)
-                withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
-                    run(
-                        `julia +$juliaup_channel --project=$each -e 'import Pkg; Pkg.instantiate()'`,
-                    )
-                end
-            elseif !isnothing(Sys.which("asdf"))
-                # Using the `ASDF_JULIA_VERSION` environment variable to control the
-                # `julia` version used doesn't appear to have an effect. Instead
-                # compute the exact path to the binary and use that instead.
-                asdf_dir = get(
-                    ENV,
-                    "ASDF_DATA_DIR",
-                    get(ENV, "ASDF_DIR", joinpath(homedir(), ".asdf")),
+        if !isnothing(Sys.which("juliaup"))
+            juliaup_channel = _juliaup_channel(julia_version, arch)
+            @info "Checking whether Julia '$juliaup_channel' is installed, if not, installing it."
+            run(`juliaup add $juliaup_channel`)
+            withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
+                run(
+                    `julia +$juliaup_channel --project=$each -e 'import Pkg; Pkg.instantiate()'`,
                 )
-                if isdir(asdf_dir)
-                    julia_path = joinpath(
-                        asdf_dir,
-                        "installs",
-                        "julia",
-                        "$(julia_version)",
-                        "bin",
-                        "julia",
-                    )
-                    if !isfile(julia_path)
-                        @info "Installing Julia '$julia_version', since it does not appear to be installed."
-                        run(`asdf install julia $julia_version`)
-                    end
-                    if isfile(julia_path)
-                        withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
-                            run(
-                                `$julia_path --project=$each -e 'import Pkg; Pkg.instantiate()'`,
-                            )
-                        end
-                    else
-                        error(
-                            "The `julia` binary for version $julia_version failed to install.",
+            end
+        elseif !isnothing(Sys.which("asdf"))
+            # Using the `ASDF_JULIA_VERSION` environment variable to control the
+            # `julia` version used doesn't appear to have an effect. Instead
+            # compute the exact path to the binary and use that instead.
+            asdf_dir = get(
+                ENV,
+                "ASDF_DATA_DIR",
+                get(ENV, "ASDF_DIR", joinpath(homedir(), ".asdf")),
+            )
+            if isdir(asdf_dir)
+                julia_path = joinpath(
+                    asdf_dir,
+                    "installs",
+                    "julia",
+                    "$(julia_version)",
+                    "bin",
+                    "julia",
+                )
+                if !isfile(julia_path)
+                    @info "Installing Julia '$julia_version', since it does not appear to be installed."
+                    run(`asdf install julia $julia_version`)
+                end
+                if isfile(julia_path)
+                    withenv("JULIA_PKG_PRECOMPILE_AUTO" => 0) do
+                        run(
+                            `$julia_path --project=$each -e 'import Pkg; Pkg.instantiate()'`,
                         )
                     end
                 else
-                    error("`asdf` is not installed in a known location. $asdf_dir")
+                    error(
+                        "The `julia` binary for version $julia_version failed to install.",
+                    )
                 end
             else
-                error("`asdf` or `juliaup` is required to instantiate the environments.")
+                error("`asdf` is not installed in a known location. $asdf_dir")
             end
+        else
+            error("`asdf` or `juliaup` is required to instantiate the environments.")
         end
     end
 end

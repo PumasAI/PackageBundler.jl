@@ -110,15 +110,31 @@ for (key, file) in toml["handlers"]
     handlers[key] = include(file)
 end
 
-for file in toml["julia_files"]
-    filename = file["filename"]
-    entry_point = file["entry_point"]
-    entry_point = isempty(entry_point) ? nothing : entry_point
-    temp = toml["temp_directory"]
-    relative_filename = relpath(filename, temp)
-    cd(temp) do
-        _stripcode(relative_filename; entry_point, handlers, context = toml)
+errors = Dict{String,Any}()
+for pkg in toml["packages"]
+    package_name = pkg["package_name"]
+    try
+        for file in pkg["julia_files"]
+            filename = file["filename"]
+            entry_point = file["entry_point"]
+            entry_point = isempty(entry_point) ? nothing : entry_point
+            temp = pkg["temp_directory"]
+            relative_filename = relpath(filename, temp)
+            cd(temp) do
+                _stripcode(relative_filename; entry_point, handlers, context = pkg)
+            end
+        end
+        get(() -> (context) -> nothing, handlers, "post_process")(pkg)
+    catch e
+        errors[package_name] = (exception = e, backtrace = catch_backtrace())
     end
 end
 
-get(() -> (context) -> nothing, handlers, "post_process")(toml)
+if !isempty(errors)
+    for (pkg_name, err) in errors
+        @error "Failed to serialize package" package = pkg_name exception = err.exception
+        showerror(stderr, err.exception, err.backtrace)
+        println(stderr)
+    end
+    error("$(length(errors)) package(s) failed to serialize")
+end
