@@ -735,6 +735,8 @@ function _execute_batch_serialization(
                 end
             end
 
+            _ensure_binary_gitattributes!(package_dir)
+
             # Build result info.
             versions = get!(Dict{String,Any}, pkg_version_info, item.package_name)
             versions[item.version] = Dict("path" => package_dir, "project" => item.project_toml)
@@ -747,6 +749,39 @@ function _execute_batch_serialization(
             rm(item.temp_dir; recursive = true, force = true)
         end
     end
+end
+
+function _ensure_binary_gitattributes!(dir::AbstractString)
+    attrs_path = joinpath(dir, ".gitattributes")
+    original_content = ""
+    existing = String[]
+    if isfile(attrs_path)
+        original_content = read(attrs_path, String)
+        existing = split(original_content, '\n')
+    end
+
+    required = [
+        "*.jls binary",
+        "*.jls.sign binary",
+    ]
+    missing_entries = String[]
+    for entry in required
+        entry in existing && continue
+        push!(missing_entries, entry)
+    end
+
+    isempty(missing_entries) && return nothing
+
+    open(attrs_path, "a") do io
+        if !isempty(existing) && !endswith(original_content, "\n")
+            println(io)
+        end
+        for entry in missing_entries
+            println(io, entry)
+        end
+    end
+
+    return nothing
 end
 
 function _stripped_source_path(

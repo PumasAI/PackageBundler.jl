@@ -254,4 +254,6 @@ end
             end
         end
     end
+
+    include("code_stripping_tests.jl")
 end
