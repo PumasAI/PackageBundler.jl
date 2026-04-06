@@ -91,6 +91,9 @@ options, each of which are tried in turn until one is found that can be used to
 select the correct Julia version. If no multiplexer is found then the current
 `julia` is used.
 
+The `arch_explicit` field is a boolean flag that determines whether the architecture
+used for bundling should be explicitly defined in the generated bundle.
+
 The `handlers` field is a list of paths to handler scripts that are used to
 inject or transform code in the bundled packages. The handler scripts must be
 valid Julia files that return a `Function` accepting the required arguments as
@@ -109,6 +112,8 @@ listed below. The valid names for handlers are:
 function bundle(
     config::AbstractString = "PackageBundler.toml";
     clean::Bool = false,
+    arch::Union{Symbol,Nothing} = nothing,
+    arch_explicit::Bool = false,
     artifacts_url::Union{String,Nothing} = nothing,
 )
     config = abspath(config)
@@ -178,6 +183,9 @@ function bundle(
     # `julia_version`.
     multiplexers = String.(get(Vector{String}, config, "multiplexers"))
 
+    # Explicitly define the architecture used for bundling.
+    arch_explicit = get(config, "arch_explicit", arch_explicit)::Bool
+
     # Ensure handler scripts valid files and adjust paths to be absolute.
     handlers = Dict{String,String}()
     for file in String.(get(Vector{String}, config, "handlers"))
@@ -205,6 +213,8 @@ function bundle(
             key_pair = (; private, public),
             handlers = handlers,
             multiplexers = multiplexers,
+            arch = arch,
+            arch_explicit = arch_explicit,
         )
         for output in outputs
             output = normpath(joinpath(dir, output))

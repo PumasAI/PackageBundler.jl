@@ -11,6 +11,34 @@ if get(ENV, "CI", "false") == "true"
     run(`git config --global user.name "test"`)
 end
 
+const TEST_ARCHS = if Sys.ARCH === :x86_64 && Sys.islinux() || Sys.iswindows()
+    [nothing, Sys.ARCH, :i686]
+elseif Sys.ARCH === :aarch64 && Sys.isapple()
+    [nothing, Sys.ARCH, :x86_64]
+else
+    [nothing, Sys.ARCH]
+end
+
+function archs_match(a::Union{Symbol,Nothing}, b::Union{Symbol,Nothing})
+    if isnothing(a)
+        if isnothing(b)
+            return true
+        elseif b === Sys.ARCH
+            return true
+        else
+            return false
+        end
+    end
+    if isnothing(b)
+        if a === Sys.ARCH
+            return true
+        else
+            return false
+        end
+    end
+    return a === b
+end
+
 function with_temp_depot(f)
     orginal = deepcopy(DEPOT_PATH)
     empty!(DEPOT_PATH)
@@ -105,18 +133,22 @@ function with_empty_registry(f::Function)
                 )
                 Pkg.Registry.add(Pkg.Registry.RegistrySpec(; url = repo))
 
-                packages_dir = joinpath(testdir, "packages")
-
-                f(downstream_dir, packages_dir)
+                f(downstream_dir, testdir)
             end
         end
     end
 end
 
-@testset "PackageBundler" begin
-    with_empty_registry() do registry_dir, packages_dir
-        # Register our test package at two different versions:
-        for version in ["0.1.0", "0.2.0"]
+function test(;
+    archs::Vector{Union{Symbol,Nothing}} = Union{Symbol,Nothing}[nothing],
+    package_versions = readdir(joinpath(@__DIR__, "packages", "TestPackage")),
+    julia_versions = readdir(joinpath(@__DIR__, "environments"))
+)
+    bundles = ["Bundle@$v" for v in package_versions]
+    with_empty_registry() do registry_dir, test_dir
+        packages_dir = joinpath(test_dir, "packages")
+        # Register our test package at selected versions:
+        for version in package_versions
             prepare_package(
                 packages_dir,
                 joinpath(@__DIR__, "packages", "TestPackage", version),
@@ -152,7 +184,7 @@ end
             versions_file = joinpath(test_package_tomls, "Versions.toml")
             @test isfile(versions_file)
             versions = TOML.parsefile(versions_file)
-            @test keys(versions) == Set(["0.1.0", "0.2.0"])
+            @test keys(versions) == Set(package_versions)
         end
 
         # Manifest files aren't committed to the repo for the environments
@@ -160,12 +192,23 @@ end
         # that we will bundled. Before we begin bundling them we need to
         # instantiate them.
         environments_dir = joinpath(@__DIR__, "environments")
-        for each_version in readdir(environments_dir)
-            run(`juliaup add $each_version`)
-            for project in readdir(joinpath(environments_dir, each_version); join = true)
+        test_environments_dir = joinpath(test_dir, "environments")
+        for each_version in filter(v -> v in julia_versions, readdir(environments_dir))
+            mkpath(joinpath(test_environments_dir, each_version))
+            for project in filter(v -> v in bundles, readdir(joinpath(environments_dir, each_version)))
+                src_project = joinpath(environments_dir, each_version, project)
+                test_project = joinpath(test_environments_dir, each_version, project)
+                cp(src_project, test_project)
+            end
+        end
+        for each_version in filter(v -> v in julia_versions, readdir(test_environments_dir)), arch in archs
+            each_version_channel = PackageBundler._juliaup_channel(each_version, arch)
+            run(`juliaup add $each_version_channel`)
+            for project in filter(v -> v in bundles, readdir(joinpath(test_environments_dir, each_version)))
+                project = joinpath(test_environments_dir, each_version, project)
                 run(
                     addenv(
-                        `julia +$each_version --startup-file=no --project=$project -e "import Pkg; Pkg.update()"`,
+                        `julia +$each_version_channel --startup-file=no --project=$project -e "import Pkg; Pkg.update()"`,
                         "JULIA_DEPOT_PATH" => DEPOT_PATH[1],
                     ),
                 )
@@ -175,11 +218,12 @@ end
                 @test isfile(manifest_toml_file)
                 manifest_toml = TOML.parsefile(manifest_toml_file)
                 resolved_version = manifest_toml["julia_version"]
-                run(`juliaup add $resolved_version`)
+                resolved_version_channel = PackageBundler._juliaup_channel(resolved_version, arch)
+                run(`juliaup add $resolved_version_channel`)
 
                 output = readchomp(
                     addenv(
-                        `julia +$each_version --startup-file=no --project=$project -e "import TestPackage; TestPackage.greet()"`,
+                        `julia +$resolved_version_channel --startup-file=no --project=$project -e "import TestPackage; TestPackage.greet()"`,
                         "JULIA_DEPOT_PATH" => DEPOT_PATH[1],
                     ),
                 )
@@ -188,72 +232,119 @@ end
             end
         end
 
-        cd(@__DIR__) do
-            @testset "Package Bundling" begin
+        packagebundler_file = joinpath(@__DIR__, "PackageBundler.toml")
+        packagebundler_toml = TOML.parsefile(packagebundler_file)
+        packagebundler_toml = merge(packagebundler_toml, Dict(
+            "environments" => ["environments/$julia_version/$bundle" for julia_version in julia_versions for bundle in bundles]
+        ))
+        open(joinpath(test_dir, "PackageBundler.toml"), "w") do io
+            TOML.print(io, packagebundler_toml)
+        end
+
+        cd(test_dir) do
+            @testset "Keypair" begin
                 key = PackageBundler.keypair()
                 @test isfile(key.private)
                 @test isfile(key.public)
-
-                PackageBundler.bundle()
             end
 
-            mktempdir() do isolated_depot
-                @testset "Bundle Installation" begin
-                    install = joinpath(
-                        @__DIR__,
-                        "build",
-                        "LocalCustomRegistry",
-                        "registry",
-                        "install.jl",
-                    )
-                    run(
-                        addenv(
-                            `julia --startup-file=no $(install)`,
-                            "JULIA_DEPOT_PATH" => isolated_depot,
-                        ),
-                    )
+            for bundle_arch in archs, install_arch in archs
+                if !archs_match(bundle_arch, install_arch)
+                    continue
+                end
+                arch_explicit = !isnothing(bundle_arch) && bundle_arch !== Sys.ARCH
+                @testset "Bundling bundle_arch=$bundle_arch, install_arch=$install_arch" begin
 
-                    environments_dir = joinpath(isolated_depot, "environments")
-                    count = 0
-                    for named_environment in readdir(environments_dir)
-                        if contains(named_environment, "Bundle")
-                            manifest_toml_file = joinpath(
-                                environments_dir,
-                                named_environment,
-                                "Manifest.toml",
+                    @testset "Package Bundling" begin
+                        key = PackageBundler.keypair()
+                        @test isfile(key.private)
+                        @test isfile(key.public)
+
+                        PackageBundler.bundle(; arch = bundle_arch, arch_explicit)
+                    end
+
+                    mktempdir() do isolated_depot
+                        @testset "Bundle Installation" begin
+                            install = joinpath(
+                                test_dir,
+                                "build",
+                                "LocalCustomRegistry",
+                                "registry",
+                                "install.jl",
                             )
-
-                            @test isfile(manifest_toml_file)
-                            manifest_toml = TOML.parsefile(manifest_toml_file)
-
-                            resolved_version = manifest_toml["julia_version"]
-                            named_environment = "@$named_environment"
-                            output = readchomp(
-                                addenv(
-                                    `julia +$resolved_version --startup-file=no --project=$(named_environment) -e "import TestPackage; TestPackage.greet()"`,
-                                    "JULIA_DEPOT_PATH" => isolated_depot,
-                                ),
-                            )
-
-                            test_package_version =
-                                manifest_toml["deps"]["TestPackage"][1]["version"]
-                            @test contains(output, "Hello, $(test_package_version)!")
-
                             @test success(
                                 addenv(
-                                    `julia +$resolved_version --startup-file=no --project=$(named_environment) -e "import TestPackage; isnothing(first(functionloc(TestPackage.greet))) || exit(1)"`,
+                                    `julia --startup-file=no $(install)`,
                                     "JULIA_DEPOT_PATH" => isolated_depot,
                                 ),
                             )
+                        end
 
-                            count += 1
+                        @testset "Bundle Usage" begin
+                            environments_dir = joinpath(isolated_depot, "environments")
+                            count = 0
+                            for named_environment in readdir(environments_dir)
+                                if contains(named_environment, "Bundle")
+                                    manifest_toml_file = joinpath(
+                                        environments_dir,
+                                        named_environment,
+                                        "Manifest.toml",
+                                    )
+
+                                    @test isfile(manifest_toml_file)
+                                    manifest_toml = TOML.parsefile(manifest_toml_file)
+
+                                    resolved_version = manifest_toml["julia_version"]
+                                    resolved_version_channel = PackageBundler._juliaup_channel(resolved_version, install_arch)
+                                    named_environment = "@$named_environment"
+                                    output = readchomp(
+                                        addenv(
+                                            `julia +$resolved_version_channel --startup-file=no --project=$(named_environment) -e "import TestPackage; TestPackage.greet()"`,
+                                            "JULIA_DEPOT_PATH" => isolated_depot,
+                                        ),
+                                    )
+
+                                    test_package_version =
+                                        manifest_toml["deps"]["TestPackage"][1]["version"]
+                                    @test contains(output, "Hello, $(test_package_version)!")
+
+                                    @test success(
+                                        addenv(
+                                            `julia +$resolved_version_channel --startup-file=no --project=$(named_environment) -e "import TestPackage; isnothing(first(functionloc(TestPackage.greet))) || exit(1)"`,
+                                            "JULIA_DEPOT_PATH" => isolated_depot,
+                                        ),
+                                    )
+
+                                    count += 1
+                                end
+                            end
+                            @test count == length(package_versions) * length(julia_versions)
+                        end
+
+                        @testset "Bundle Removal" begin
+                            remove = joinpath(
+                                isolated_depot,
+                                "registries",
+                                "LocalCustomRegistry",
+                                "remove.jl",
+                            )
+                            @test success(
+                                addenv(
+                                    `julia --startup-file=no $(remove)`,
+                                    "JULIA_DEPOT_PATH" => isolated_depot,
+                                ),
+                            )
                         end
                     end
-                    @test count == 6
                 end
             end
         end
     end
 
     include("code_stripping_tests.jl")
+end
+
+@testset "PackageBundler" begin
+    test(archs = TEST_ARCHS, package_versions = ["0.1.0"], julia_versions = ["1.10"])
+    test()
 end

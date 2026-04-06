@@ -1,13 +1,5 @@
 name = "LocalCustomRegistry"
 uuid = "a0e467e0-8c5a-11e4-9d3f-823b93f75cbb"
-environments = [
-    "environments/1.9/Bundle@0.1.0",
-    "environments/1.9/Bundle@0.2.0",
-    "environments/1.10/Bundle@0.1.0",
-    "environments/1.10/Bundle@0.2.0",
-    "environments/1.11/Bundle@0.1.0",
-    "environments/1.11/Bundle@0.2.0",
-]
 outputs = [
     "build/LocalCustomRegistry",
     "build/LocalCustomRegistry.tar.gz",
