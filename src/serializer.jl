@@ -76,8 +76,22 @@ function _stripcode(
         Meta.isexpr(expr, :toplevel) || error("Expected toplevel expr. $expr")
         buffer = IOBuffer()
         Serialization.serialize(buffer, expr)
-        bytes = take!(buffer)
-        write(io, xor.(bytes, xorshift))
+        data = take!(buffer)
+
+        data_encoder = get(handlers, "data_encoder") do
+            function (filename, data, context)
+                return xor.(data, xorshift)
+            end
+        end
+        data = data_encoder(filename, data, context)
+
+        write(io, data)
+    end
+
+    get_data_decoder = get(handlers, "data_decoder") do
+        function (filename, xorshift, context)
+            return :(data -> xor.(data, $xorshift))
+        end
     end
 
     # Create a shim file that will load the serialized code and evaluate it at
@@ -90,7 +104,9 @@ function _stripcode(
             $(is_entry_point ? "module $entry_point" : "")
             cd(@__DIR__) do
                 pkgid = Base.PkgId(Base.UUID("9e88b42a-f829-5b0c-bbe9-9e923198166b"), "Serialization")
-                buffer = seekstart(IOBuffer(xor.(read(\"$(basename(jls))\"), $(repr(xorshift)))))
+                data = read(\"$(basename(jls))\")
+                data_decoder = $(get_data_decoder(filename, xorshift, context))
+                buffer = seekstart(IOBuffer(data_decoder(data)))
                 for x in Base.invokelatest(Base.require(pkgid).deserialize, buffer).args
                     Core.eval(@__MODULE__, x)
                 end
