@@ -21,6 +21,8 @@ function _generate_stripped_bundle(;
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
     multiplexers::Vector{String},
+    arch::Union{Symbol,Nothing} = nothing,
+    arch_explicit::Bool = false,
 )
     output_dir = abspath(output_dir)
 
@@ -38,6 +40,8 @@ function _generate_stripped_bundle(;
             registries = registries,
             key_pair = key_pair,
             multiplexers = multiplexers,
+            arch = arch,
+            arch_explicit = arch_explicit,
         )
 
         append!(get!(Vector{PackageWorkItem}, work_by_version, julia_version), items)
@@ -52,6 +56,7 @@ function _generate_stripped_bundle(;
             key_pair,
             handlers,
             multiplexers,
+            arch,
         )
         for (k, v) in new_pkg_version_info
             current_pkg_version_info = get!(Dict{String,Any}, pkg_version_info, k)
@@ -339,6 +344,8 @@ function _process_project_env(;
     registries::Dict{String,String},
     key_pair::@NamedTuple{private::String, public::String},
     multiplexers::Vector{String},
+    arch::Union{Symbol,Nothing} = nothing,
+    arch_explicit::Bool = false
 )
     project_dir = normpath(project_dir)
     output_dir = normpath(output_dir)
@@ -368,7 +375,7 @@ function _process_project_env(;
     _sign_file(joinpath(named_environment, "Manifest.toml"), key_pair.private)
     write(joinpath(named_environment, basename(key_pair.public)), read(key_pair.public))
 
-    package_paths = _sniff_versions(project_dir, multiplexers)
+    package_paths = _sniff_versions(project_dir, multiplexers, arch)
 
     packagebundler_file = joinpath(project_dir, "PackageBundler.toml")
     packagebundler_toml =
@@ -377,6 +384,16 @@ function _process_project_env(;
     julia_version = TOML.parsefile(manifest_toml)["julia_version"]
     julia_version =
         get(get(Dict{String,Any}, packagebundler_toml, "juliaup"), "channel", julia_version)
+    if arch_explicit
+        packagebundler_toml = merge(packagebundler_toml, Dict(
+            "juliaup" => Dict(
+                "channel" => _juliaup_channel(julia_version, arch)
+            )
+        ))
+        open(joinpath(named_environment, "PackageBundler.toml"), "w") do io
+            TOML.print(io, packagebundler_toml)
+        end
+    end
 
     work_items = PackageWorkItem[]
     for (each_uuid, each_name) in stripped
@@ -410,14 +427,14 @@ end
 #     "julia_version" => v"<version>"
 # ))
 #
-function _sniff_versions(environment::AbstractString, multiplexers)
+function _sniff_versions(environment::AbstractString, multiplexers, arch::Union{Symbol,Nothing} = nothing)
     registries = Dict(
         reg.uuid => _process_reg_info_uuid_mapping(reg) for
         reg in Pkg.Registry.reachable_registries()
     )
     project = Base.env_project_file(environment)
     env = Pkg.Types.EnvCache(project)
-    stdlib_path = _get_stdlib_path(env, environment, multiplexers)
+    stdlib_path = _get_stdlib_path(env, environment, multiplexers, arch)
     output = Dict{String,Dict{String,Any}}()
     for (uuid, entry) in env.manifest.deps
         name = "$(entry.name)"
@@ -470,13 +487,13 @@ function _sniff_versions(environment::AbstractString, multiplexers)
     return output
 end
 
-function _get_stdlib_path(env, environment, multiplexers)
+function _get_stdlib_path(env, environment, multiplexers, arch::Union{Symbol,Nothing} = nothing)
     toml_file = joinpath(environment, "PackageBundler.toml")
     toml = isfile(toml_file) ? TOML.parsefile(toml_file) : Dict()
     juliaup = get(Dict, toml, "juliaup")
     channel = get(juliaup, "channel", nothing)
     version = something(channel, env.manifest.julia_version)
-    julia_bin = _process_multiplexers(multiplexers, version)
+    julia_bin = _process_multiplexers(multiplexers, version, arch)
     return read(
         `$julia_bin --startup-file=no -e 'import Pkg; print(Pkg.stdlib_dir())'`,
         String,
@@ -675,8 +692,9 @@ function _execute_batch_serialization(
     key_pair::@NamedTuple{private::String, public::String},
     handlers::Dict,
     multiplexers::Vector{String},
+    arch::Union{Symbol,Nothing} = nothing,
 )
-    @info "Stripping source code." julia_version n_packages = length(items)
+    @info "Stripping source code." arch julia_version n_packages = length(items)
 
     # Build batch payload with all packages for this Julia version.
     packages_payload = [
@@ -702,7 +720,7 @@ function _execute_batch_serialization(
                 TOML.print(io, payload)
             end
             script = joinpath(@__DIR__, "serializer.jl")
-            binary = _process_multiplexers(multiplexers, julia_version)
+            binary = _process_multiplexers(multiplexers, julia_version, arch)
             run(`$(binary) --startup-file=no $(script) $(toml_file)`)
         end
 
@@ -797,12 +815,13 @@ end
 function _process_multiplexers(
     multiplexers::Vector{String},
     julia_version::Union{String,VersionNumber},
+    arch::Union{Symbol,Nothing} = nothing,
 )
     for multiplexer in multiplexers
         exists = Sys.which(multiplexer)
         if !isnothing(exists)
             if multiplexer == "juliaup"
-                return `julia +$(julia_version)`
+                return `julia +$(_juliaup_channel(julia_version, arch))`
             elseif multiplexer == "asdf"
                 return withenv("ASDF_JULIA_VERSION" => "$(julia_version)") do
                     path = readchomp(`asdf which julia`)
@@ -823,4 +842,13 @@ function _process_multiplexers(
     else
         error("no multiplexers found: $(repr(multiplexers))")
     end
+end
+
+function _juliaup_channel(julia_version::Union{String,VersionNumber}, arch::Union{Symbol,Nothing} = nothing)
+    if isnothing(arch)
+        return julia_version
+    end
+
+    juliaup_arch = if arch == :i686; :x86; elseif arch == :x86_64; :x64; else arch; end
+    return "$(julia_version)~$juliaup_arch"
 end
